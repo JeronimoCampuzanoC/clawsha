@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Terraform (el .terraform.lock.hcl sí se sube)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Secretos: certificados, llaves y credenciales nunca entran al repo
+*.pem
+*.key
+*.crt
+*.csr
+*.srl
+.env
+.env.*
+!.env.example
+
+# Resultados de benchmarks (las gráficas finales van en docs/)
+bench/results/
+
+# Sistema y editores
+.DS_Store
+.idea/
+.vscode/
