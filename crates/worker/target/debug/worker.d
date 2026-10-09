@@ -1,0 +1,1 @@
+/Users/lau/Documents/University/IT_Trajectory/Distributed_System/clawsha/crates/worker/target/debug/worker: /Users/lau/Documents/University/IT_Trajectory/Distributed_System/clawsha/crates/worker/src/main.rs

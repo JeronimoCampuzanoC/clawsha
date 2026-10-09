@@ -1,0 +1,12 @@
+[package]
+name = "worker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sha2 = "0.11.0"
+thiserror = "2.0.21"
+uuid = "1.27.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
