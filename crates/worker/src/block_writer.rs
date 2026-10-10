@@ -1,8 +1,9 @@
 use crate::error::StorageError;
+use crate::storage::meta_path_for;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -56,6 +57,13 @@ impl BlockWriter {
         Ok(())
     }
 
+    /// Creates the shard directory, writes the .meta first and then publishes the block.
+    fn publish(&self, parent: &Path, meta_path: &Path) -> std::io::Result<()> {
+        fs::create_dir_all(parent)?;
+        write_meta(meta_path, &self.expected_sha256)?;
+        fs::rename(&self.tmp_path, &self.final_path)
+    }
+
     /// Verifies size and hash, makes the data durable and publishes the block.
     pub fn finish(mut self) -> Result<(), StorageError> {
         if self.written != self.expected_size {
@@ -70,25 +78,35 @@ impl BlockWriter {
             return Err(StorageError::HashMismatch);
         }
 
-        // Force the bytes onto the disk before the block becomes visible.
         self.file.sync_all()?;
 
         let parent = self
             .final_path
             .parent()
             .expect("final path always has a parent directory");
-        fs::create_dir_all(parent)?;
 
-        // Another writer may have published the same block in the meantime.
         if self.final_path.exists() {
             return Err(StorageError::AlreadyExists);
         }
 
-        // Atomic: the block appears complete or not at all.
-        fs::rename(&self.tmp_path, &self.final_path)?;
+        // The shard directory can be pruned between create_dir_all and the
+        // write/rename, so retry a few times.
+        let meta_path = meta_path_for(&self.final_path);
+        let mut attempts = 0;
+        loop {
+            match self.publish(parent, &meta_path) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && attempts < 3 => {
+                    attempts += 1;
+                }
+                Err(e) => {
+                    let _ = fs::remove_file(&meta_path);
+                    return Err(e.into());
+                }
+            }
+        }
         self.finished = true;
 
-        // Make the new directory entry durable too.
         File::open(parent)?.sync_all()?;
         Ok(())
     }
@@ -103,4 +121,10 @@ impl Drop for BlockWriter {
                 .fetch_sub(self.expected_size, Ordering::SeqCst);
         }
     }
+}
+
+fn write_meta(path: &Path, sha256: &[u8; 32]) -> std::io::Result<()> {
+    let mut file = File::create(path)?;
+    file.write_all(sha256)?;
+    file.sync_all()
 }

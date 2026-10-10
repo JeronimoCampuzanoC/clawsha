@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package dfs.v1;
+
+// Services a worker (DataNode) offers to gateways, the master and other workers.
+service WorkerService {
+  rpc PutBlock(stream BlockFrame) returns (PutBlockResponse);
+  rpc GetBlock(GetBlockRequest) returns (stream BlockFrame);
+}
+
+message BlockFrame {
+  oneof kind {
+    BlockHeader header = 1;
+    DataFrame data = 2;
+  }
+}
+
+message BlockHeader {
+  string block_id = 1;      // UUID
+  bytes sha256 = 2;         // raw digest, exactly 32 bytes
+  uint64 size = 3;          
+  string next_worker = 4;   //host:port of the next worker in the chain
+}
+
+message DataFrame {
+  bytes data = 1;           // up to 256 KiB
+  fixed32 crc32c = 2;    
+}
+
+message PutBlockResponse {
+  string block_id = 1;
+  uint64 stored_bytes = 2;
+}
+
+message GetBlockRequest {
+  string block_id = 1;
+  uint64 offset = 2;       
+}

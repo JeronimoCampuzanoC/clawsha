@@ -1,5 +1,5 @@
 use crate::error::StorageError;
-use crate::storage::{BlockInfo, Storage};
+use crate::storage::{BlockInfo, Storage, meta_path_for};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -308,94 +308,197 @@ fn list_works_after_prune() {
     assert!(storage.list_blocks().unwrap().is_empty());
 }
 
-    #[test]
-    fn block_larger_than_quota_is_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        let storage = Storage::new(dir.path().to_path_buf()).with_quota(10);
+#[test]
+fn block_larger_than_quota_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf()).with_quota(10);
 
-        let result = storage.begin_write(ID, 11, sha(b"01234567890"));
+    let result = storage.begin_write(ID, 11, sha(b"01234567890"));
 
-        assert!(matches!(result, Err(StorageError::QuotaExceeded)));
-        assert_eq!(storage.used_bytes(), 0);
-        assert_eq!(fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
-    }
+    assert!(matches!(result, Err(StorageError::QuotaExceeded)));
+    assert_eq!(storage.used_bytes(), 0);
+    assert_eq!(fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
+}
 
-    #[test]
-    fn used_bytes_grows_after_a_write() {
-        let dir = tempfile::tempdir().unwrap();
-        let storage = Storage::new(dir.path().to_path_buf()).with_quota(100);
+#[test]
+fn used_bytes_grows_after_a_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf()).with_quota(100);
 
-        put(&storage, ID, &[b"hello"]).unwrap();
+    put(&storage, ID, &[b"hello"]).unwrap();
 
-        assert_eq!(storage.used_bytes(), 5);
-    }
+    assert_eq!(storage.used_bytes(), 5);
+}
 
-    #[test]
-    fn abandoned_writer_gives_the_space_back() {
-        let dir = tempfile::tempdir().unwrap();
-        let storage = Storage::new(dir.path().to_path_buf()).with_quota(100);
+#[test]
+fn abandoned_writer_gives_the_space_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf()).with_quota(100);
 
-        let writer = storage.begin_write(ID, 8, sha(b"12345678")).unwrap();
-        assert_eq!(storage.used_bytes(), 8);
+    let writer = storage.begin_write(ID, 8, sha(b"12345678")).unwrap();
+    assert_eq!(storage.used_bytes(), 8);
 
-        drop(writer);
-        assert_eq!(storage.used_bytes(), 0);
-    }
+    drop(writer);
+    assert_eq!(storage.used_bytes(), 0);
+}
 
-    #[test]
-    fn failed_finish_gives_the_space_back() {
-        let dir = tempfile::tempdir().unwrap();
-        let storage = Storage::new(dir.path().to_path_buf()).with_quota(100);
+#[test]
+fn failed_finish_gives_the_space_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf()).with_quota(100);
 
-        let mut writer = storage.begin_write(ID, 5, sha(b"other")).unwrap();
-        writer.write_chunk(b"hello").unwrap();
-        assert!(writer.finish().is_err());
+    let mut writer = storage.begin_write(ID, 5, sha(b"other")).unwrap();
+    writer.write_chunk(b"hello").unwrap();
+    assert!(writer.finish().is_err());
 
-        assert_eq!(storage.used_bytes(), 0);
-    }
+    assert_eq!(storage.used_bytes(), 0);
+}
 
-    #[test]
-    fn concurrent_reservations_cannot_exceed_the_quota() {
-        const OTHER: &str = "7b04e9d0-1111-4562-b3fc-2c963f66afa6";
-        let dir = tempfile::tempdir().unwrap();
-        let storage = Storage::new(dir.path().to_path_buf()).with_quota(10);
+#[test]
+fn concurrent_reservations_cannot_exceed_the_quota() {
+    const OTHER: &str = "7b04e9d0-1111-4562-b3fc-2c963f66afa6";
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf()).with_quota(10);
 
-        let first = storage.begin_write(ID, 6, sha(b"abcdef")).unwrap();
-        let second = storage.begin_write(OTHER, 6, sha(b"ghijkl"));
+    let first = storage.begin_write(ID, 6, sha(b"abcdef")).unwrap();
+    let second = storage.begin_write(OTHER, 6, sha(b"ghijkl"));
 
-        assert!(matches!(second, Err(StorageError::QuotaExceeded)));
-        drop(first);
-    }
+    assert!(matches!(second, Err(StorageError::QuotaExceeded)));
+    drop(first);
+}
 
-    #[test]
-    fn delete_frees_quota() {
-        const OTHER: &str = "7b04e9d0-1111-4562-b3fc-2c963f66afa6";
-        let dir = tempfile::tempdir().unwrap();
-        let storage = Storage::new(dir.path().to_path_buf()).with_quota(10);
+#[test]
+fn delete_frees_quota() {
+    const OTHER: &str = "7b04e9d0-1111-4562-b3fc-2c963f66afa6";
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf()).with_quota(10);
 
-        put(&storage, ID, &[b"12345678"]).unwrap();
-        assert!(matches!(
-            put(&storage, OTHER, &[b"abcdefgh"]),
-            Err(StorageError::QuotaExceeded)
-        ));
+    put(&storage, ID, &[b"12345678"]).unwrap();
+    assert!(matches!(
+        put(&storage, OTHER, &[b"abcdefgh"]),
+        Err(StorageError::QuotaExceeded)
+    ));
 
-        storage.delete_block(ID).unwrap();
-        put(&storage, OTHER, &[b"abcdefgh"]).unwrap();
-        assert_eq!(storage.used_bytes(), 8);
-    }
+    storage.delete_block(ID).unwrap();
+    put(&storage, OTHER, &[b"abcdefgh"]).unwrap();
+    assert_eq!(storage.used_bytes(), 8);
+}
 
-    #[test]
-    fn open_counts_existing_blocks_and_clears_leftovers() {
-        let dir = tempfile::tempdir().unwrap();
-        let first = Storage::new(dir.path().to_path_buf());
-        put(&first, ID, &[b"hello"]).unwrap();
+#[test]
+fn open_counts_existing_blocks_and_clears_leftovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = Storage::new(dir.path().to_path_buf());
+    put(&first, ID, &[b"hello"]).unwrap();
 
-        // Simulate a crash that left a temp file behind.
-        fs::create_dir_all(dir.path().join("tmp")).unwrap();
-        fs::write(dir.path().join("tmp/orphan.tmp"), b"junk").unwrap();
+    // Simulate a crash that left a temp file behind.
+    fs::create_dir_all(dir.path().join("tmp")).unwrap();
+    fs::write(dir.path().join("tmp/orphan.tmp"), b"junk").unwrap();
 
-        let reopened = Storage::open(dir.path().to_path_buf(), 100).unwrap();
+    let reopened = Storage::open(dir.path().to_path_buf(), 100).unwrap();
 
-        assert_eq!(reopened.used_bytes(), 5);
-        assert_eq!(fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
-    }
+    assert_eq!(reopened.used_bytes(), 5);
+    assert_eq!(fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
+}
+
+#[test]
+fn meta_file_holds_the_block_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"hello"]).unwrap();
+
+    let meta = meta_path_for(&storage.block_path(ID).unwrap());
+    assert_eq!(fs::read(meta).unwrap(), sha(b"hello"));
+    assert_eq!(storage.stored_checksum(ID).unwrap(), sha(b"hello"));
+}
+
+#[test]
+fn list_does_not_report_meta_files_as_blocks() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"data"]).unwrap();
+
+    assert_eq!(storage.list_blocks().unwrap().len(), 1);
+}
+
+#[test]
+fn rejected_write_leaves_no_meta_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+
+    let mut writer = storage.begin_write(ID, 5, sha(b"other")).unwrap();
+    writer.write_chunk(b"hello").unwrap();
+    assert!(writer.finish().is_err());
+
+    let meta = meta_path_for(&storage.block_path(ID).unwrap());
+    assert!(!meta.exists());
+}
+
+#[test]
+fn delete_removes_the_meta_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"data"]).unwrap();
+    let meta = meta_path_for(&storage.block_path(ID).unwrap());
+
+    storage.delete_block(ID).unwrap();
+
+    assert!(!meta.exists());
+}
+
+#[test]
+fn verify_accepts_a_healthy_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"hello distributed world"]).unwrap();
+
+    storage.verify_block(ID).unwrap();
+}
+
+#[test]
+fn verify_detects_corruption() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"hello"]).unwrap();
+
+    // Same length, different bytes: only the hash can tell.
+    fs::write(storage.block_path(ID).unwrap(), b"jello").unwrap();
+
+    assert!(matches!(
+        storage.verify_block(ID).unwrap_err(),
+        StorageError::HashMismatch
+    ));
+}
+
+#[test]
+fn verify_missing_block_is_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+
+    assert!(matches!(
+        storage.verify_block(ID).unwrap_err(),
+        StorageError::NotFound
+    ));
+}
+
+#[test]
+fn verify_without_a_meta_file_cannot_vouch_for_the_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"data"]).unwrap();
+    fs::remove_file(meta_path_for(&storage.block_path(ID).unwrap())).unwrap();
+
+    assert!(matches!(
+        storage.verify_block(ID).unwrap_err(),
+        StorageError::ChecksumUnavailable
+    ));
+}
+
+#[test]
+fn verify_works_on_a_multi_chunk_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    let big = vec![7u8; 600 * 1024]; // spans several 256 KiB reads
+    put(&storage, ID, &[&big]).unwrap();
+
+    storage.verify_block(ID).unwrap();
+}

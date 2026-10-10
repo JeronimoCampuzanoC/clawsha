@@ -1,8 +1,9 @@
 use crate::block_writer::BlockWriter;
 use crate::error::StorageError;
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{Seek, SeekFrom};
-use std::path::PathBuf;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
@@ -30,7 +31,7 @@ impl Storage {
     }
 
     // Returns <data_dir>/blocks/ab/cd/<uuid>, or an error if the id is not a valid UUID.
-    pub fn block_path(&self, block_id: &str) -> Result<PathBuf, uuid::Error> {
+    pub fn block_path(&self, block_id: &str) -> Result<PathBuf, StorageError> {
         let id = Uuid::parse_str(block_id)?;
         let name = id.hyphenated().to_string();
 
@@ -107,6 +108,7 @@ impl Storage {
         let size = fs::metadata(&path).map_err(io_to_storage)?.len();
         fs::remove_file(&path).map_err(io_to_storage)?;
         self.used_bytes.fetch_sub(size, Ordering::SeqCst);
+        let _ = fs::remove_file(meta_path_for(&path));
 
         Ok(size)
     }
@@ -230,7 +232,7 @@ impl Storage {
     /// Atomically adds `size` to the used counter, or fails if it would pass the quota.
     fn reserve(&self, size: u64) -> Result<(), StorageError> {
         self.used_bytes
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
                 used.checked_add(size)
                     .filter(|total| *total <= self.quota_bytes)
             })
@@ -253,6 +255,36 @@ impl Storage {
         }
         Ok(removed)
     }
+
+    /// The SHA-256 recorded when the block was written.
+    pub fn stored_checksum(&self, block_id: &str) -> Result<[u8; 32], StorageError> {
+        let path = self.block_path(block_id)?;
+        read_checksum(&meta_path_for(&path))
+    }
+
+    /// Recomputes the block's SHA-256 from disk and compares it with the stored one.
+    pub fn verify_block(&self, block_id: &str) -> Result<(), StorageError> {
+        let path = self.block_path(block_id)?;
+
+        // Open first, so a missing block is NotFound and not ChecksumUnavailable.
+        let mut file = File::open(&path).map_err(io_to_storage)?;
+        let expected = read_checksum(&meta_path_for(&path))?;
+
+        let mut hasher = Sha256::new();
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            let n = file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+
+        if hasher.finalize()[..] != expected[..] {
+            return Err(StorageError::HashMismatch);
+        }
+        Ok(())
+    }
 }
 
 /// read_dir that returns None when the directory does not exist.
@@ -270,4 +302,23 @@ fn io_to_storage(e: std::io::Error) -> StorageError {
     } else {
         StorageError::Io(e)
     }
+}
+
+/// Path of the checksum file that sits next to a block file.
+pub(crate) fn meta_path_for(block_path: &Path) -> PathBuf {
+    block_path.with_extension("meta")
+}
+
+/// Reads the 32-byte checksum stored in a .meta file.
+fn read_checksum(meta: &Path) -> Result<[u8; 32], StorageError> {
+    let bytes = match fs::read(meta) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(StorageError::ChecksumUnavailable);
+        }
+        Err(e) => return Err(e.into()),
+    };
+    bytes
+        .try_into()
+        .map_err(|_| StorageError::ChecksumUnavailable)
 }

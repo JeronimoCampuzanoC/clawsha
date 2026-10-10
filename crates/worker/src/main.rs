@@ -2,6 +2,12 @@ mod block_writer;
 mod config;
 mod error;
 mod storage;
+#[cfg(test)]
+mod tests;
+
+pub mod pb {
+    tonic::include_proto!("dfs.v1");
+}
 
 use clap::Parser;
 
