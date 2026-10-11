@@ -1,6 +1,9 @@
+mod auth;
+mod cluster;
 mod config;
 mod error;
 mod path;
+mod placement;
 mod pb;
 #[cfg(test)]
 mod tests;
