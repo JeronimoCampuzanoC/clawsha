@@ -1,10 +1,15 @@
 mod auth;
 mod cluster;
 mod config;
+mod db;
 mod error;
+mod namespace;
 mod path;
 mod placement;
+mod read_plan;
 mod pb;
+mod time;
+mod upload;
 #[cfg(test)]
 mod tests;
 

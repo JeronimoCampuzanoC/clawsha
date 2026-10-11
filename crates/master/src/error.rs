@@ -40,6 +40,12 @@ pub enum MasterError {
 
     #[error("dynamodb: {0}")]
     Db(String),
+
+    /// Internal: the condition of the caller's i-th item in a fenced write
+    /// failed. db callers always map it to a real error (AlreadyExists,
+    /// NotFound, Locked...); if one leaks, it means a mapping is missing.
+    #[error("condition failed on item {0}")]
+    ConditionFailed(usize),
 }
 
 impl From<MasterError> for Status {
@@ -53,7 +59,7 @@ impl From<MasterError> for Status {
             DirNotEmpty | Locked => Status::failed_precondition(msg),
             Unauthenticated => Status::unauthenticated(msg),
             NotLeader | Fenced | NoWorkers(_) | NoReplica(_) => Status::unavailable(msg),
-            Db(_) => Status::internal(msg),
+            Db(_) | ConditionFailed(_) => Status::internal(msg),
         }
     }
 }

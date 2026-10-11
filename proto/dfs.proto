@@ -254,9 +254,10 @@ message FileInfo {
 
 message AbortUploadRequest {
   string user_id = 1;
-  string inode_id = 2;
-  uint64 version_no = 3;
-  string lease_id = 4;
+  string path = 2;
+  string inode_id = 3;
+  uint64 version_no = 4;
+  string lease_id = 5;
 }
 
 // ----- read ----------------------------------------------------------------

@@ -1,4 +1,8 @@
 mod auth_test;
 mod cluster_test;
+mod db_test;
 mod path_test;
 mod placement_test;
+mod support;
+mod namespace_test;
+mod upload_test;
