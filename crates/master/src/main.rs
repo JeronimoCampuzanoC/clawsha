@@ -1,5 +1,9 @@
 mod config;
+mod error;
+mod path;
 mod pb;
+#[cfg(test)]
+mod tests;
 
 use clap::Parser;
 
