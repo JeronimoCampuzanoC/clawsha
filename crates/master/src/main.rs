@@ -3,6 +3,7 @@ mod cluster;
 mod config;
 mod db;
 mod error;
+mod leader;
 mod namespace;
 mod path;
 mod placement;

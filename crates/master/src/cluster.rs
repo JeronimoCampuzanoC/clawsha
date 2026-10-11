@@ -117,6 +117,12 @@ impl ClusterState {
         }
     }
 
+    /// Forgets everything. Called when this master becomes leader: the map
+    /// is rebuilt from the block reports the workers send on the new fencing.
+    pub fn clear(&self) {
+        *self.inner.lock().unwrap() = Inner::default();
+    }
+
     pub fn heartbeat(&self, hb: Heartbeat, now_ms: u64) -> HeartbeatOutcome {
         let mut inner = self.inner.lock().unwrap();
 

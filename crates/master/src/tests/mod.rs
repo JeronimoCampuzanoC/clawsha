@@ -6,3 +6,4 @@ mod placement_test;
 mod support;
 mod namespace_test;
 mod upload_test;
+mod leader_test;
