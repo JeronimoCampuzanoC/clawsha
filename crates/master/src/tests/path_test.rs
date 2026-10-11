@@ -8,7 +8,10 @@ fn root_has_no_components() {
 
 #[test]
 fn nested_path_is_split_into_components() {
-    assert_eq!(parse("/docs/2026/a.pdf").unwrap(), vec!["docs", "2026", "a.pdf"]);
+    assert_eq!(
+        parse("/docs/2026/a.pdf").unwrap(),
+        vec!["docs", "2026", "a.pdf"]
+    );
 }
 
 #[test]
@@ -67,5 +70,8 @@ fn split_parent_of_top_level_entry_gives_empty_parent() {
 
 #[test]
 fn root_cannot_be_split() {
-    assert!(matches!(split_parent("/"), Err(MasterError::InvalidPath(_))));
+    assert!(matches!(
+        split_parent("/"),
+        Err(MasterError::InvalidPath(_))
+    ));
 }

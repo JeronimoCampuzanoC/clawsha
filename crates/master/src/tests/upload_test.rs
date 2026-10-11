@@ -74,7 +74,11 @@ async fn start_upload_plans_one_block_per_16mib_with_two_azs() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
 
-    let plan = r.uploads.start(&r.t.fence, U1, "/a.bin", 2_500, None, now).await.unwrap();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 2_500, None, now)
+        .await
+        .unwrap();
 
     assert_eq!(plan.version_no, 1);
     assert_eq!(plan.block_size, BLOCK);
@@ -87,10 +91,25 @@ async fn start_upload_plans_one_block_per_16mib_with_two_azs() {
     }
 
     // The metadata is already there, but the file is not visible yet.
-    let v = r.t.db.get_version(&plan.inode_id, 1).await.unwrap().unwrap();
+    let v =
+        r.t.db
+            .get_version(&plan.inode_id, 1)
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(v.status, VersionStatus::Pending);
-    assert_eq!(r.t.db.list_blocks(&format!("{}#1", plan.inode_id)).await.unwrap().len(), 3);
-    assert!(matches!(r.ns.stat(U1, "/a.bin").await, Err(MasterError::NotFound)));
+    assert_eq!(
+        r.t.db
+            .list_blocks(&format!("{}#1", plan.inode_id))
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    assert!(matches!(
+        r.ns.resolve(U1, "/a.bin").await,
+        Err(MasterError::NotFound)
+    ));
 
     r.t.cleanup().await;
 }
@@ -99,16 +118,31 @@ async fn start_upload_plans_one_block_per_16mib_with_two_azs() {
 async fn empty_file_has_no_blocks() {
     let Some(r) = rig().await else { return };
 
-    let plan = r.uploads.start(&r.t.fence, U1, "/empty", 0, None, now_ms()).await.unwrap();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/empty", 0, None, now_ms())
+        .await
+        .unwrap();
     assert!(plan.blocks.is_empty());
 
     let info = r
         .uploads
-        .commit(&r.t.fence, U1, "/empty", &plan.inode_id, 1, &plan.lease_id, 0, &sha(b""), vec![], now_ms())
+        .commit(
+            &r.t.fence,
+            U1,
+            "/empty",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            0,
+            &sha(b""),
+            vec![],
+            now_ms(),
+        )
         .await
         .unwrap();
     assert_eq!(info.size, 0);
-    assert_eq!(r.ns.stat(U1, "/empty").await.unwrap().size, 0);
+    assert_eq!(r.ns.resolve(U1, "/empty").await.unwrap().size, 0);
 
     r.t.cleanup().await;
 }
@@ -119,11 +153,15 @@ async fn start_upload_needs_a_parent_and_refuses_directories() {
     r.ns.mkdir(&r.t.fence, U1, "/docs", now_ms()).await.unwrap();
 
     assert!(matches!(
-        r.uploads.start(&r.t.fence, U1, "/nope/a.bin", 10, None, now_ms()).await,
+        r.uploads
+            .start(&r.t.fence, U1, "/nope/a.bin", 10, None, now_ms())
+            .await,
         Err(MasterError::NotFound)
     ));
     assert!(matches!(
-        r.uploads.start(&r.t.fence, U1, "/docs", 10, None, now_ms()).await,
+        r.uploads
+            .start(&r.t.fence, U1, "/docs", 10, None, now_ms())
+            .await,
         Err(MasterError::AlreadyExists)
     ));
 
@@ -135,20 +173,44 @@ async fn concurrent_writers_on_the_same_path_are_excluded() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
 
-    let first = r.uploads.start(&r.t.fence, U1, "/a.bin", 10, None, now).await.unwrap();
-    let second = r.uploads.start(&r.t.fence, U1, "/a.bin", 10, None, now).await;
+    let first = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 10, None, now)
+        .await
+        .unwrap();
+    let second = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 10, None, now)
+        .await;
     assert!(matches!(second, Err(MasterError::Locked)));
 
     r.uploads
-        .abort(&r.t.fence, U1, "/a.bin", &first.inode_id, 1, &first.lease_id, now)
+        .abort(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &first.inode_id,
+            1,
+            &first.lease_id,
+            now,
+        )
         .await
         .unwrap();
     // The aborted file never existed for readers, so this is a brand-new
     // file: new inode, version 1. The old version stays OLD for the GC.
-    let third = r.uploads.start(&r.t.fence, U1, "/a.bin", 10, None, now).await.unwrap();
+    let third = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 10, None, now)
+        .await
+        .unwrap();
     assert_ne!(third.inode_id, first.inode_id);
     assert_eq!(third.version_no, 1);
-    let old = r.t.db.get_version(&first.inode_id, 1).await.unwrap().unwrap();
+    let old =
+        r.t.db
+            .get_version(&first.inode_id, 1)
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(old.status, VersionStatus::Old);
 
     r.t.cleanup().await;
@@ -161,10 +223,17 @@ async fn start_upload_without_workers_is_unavailable() {
     cluster.heartbeat(hb("only", "a"), now_ms());
     let uploads = UploadCoordinator::new(Namespace::new(t.db.clone()), cluster, BLOCK, 2);
 
-    let r = uploads.start(&t.fence, U1, "/a.bin", 10, None, now_ms()).await;
+    let r = uploads
+        .start(&t.fence, U1, "/a.bin", 10, None, now_ms())
+        .await;
     assert!(matches!(r, Err(MasterError::NoWorkers(_))), "got {r:?}");
     // Nothing half-made is left behind.
-    assert!(t.db.get_inode("root:user-1", "a.bin").await.unwrap().is_none());
+    assert!(
+        t.db.get_inode("root:user-1", "a.bin")
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     t.cleanup().await;
 }
@@ -174,30 +243,57 @@ async fn commit_publishes_the_file_and_records_locations() {
     let Some(r) = rig().await else { return };
     let content = vec![7u8; 2_500];
     let now = now_ms();
-    let plan = r.uploads.start(&r.t.fence, U1, "/a.bin", 2_500, None, now).await.unwrap();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 2_500, None, now)
+        .await
+        .unwrap();
 
     let info = r
         .uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 2_500, &sha(&content), acks(&plan, &content), now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            2_500,
+            &sha(&content),
+            acks(&plan, &content),
+            now,
+        )
         .await
         .unwrap();
 
     assert_eq!(info.version_no, 1);
     assert_eq!(info.size, 2_500);
     assert_eq!(info.block_count, 3);
-    let stat = r.ns.stat(U1, "/a.bin").await.unwrap();
+    let stat = r.ns.resolve(U1, "/a.bin").await.unwrap();
     assert_eq!(stat.size, 2_500);
     assert_eq!(stat.current_version, 1);
-    let v = r.t.db.get_version(&plan.inode_id, 1).await.unwrap().unwrap();
+    let v =
+        r.t.db
+            .get_version(&plan.inode_id, 1)
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(v.status, VersionStatus::Committed);
     assert_eq!(v.sha256, sha(&content));
-    let blocks = r.t.db.list_blocks(&format!("{}#1", plan.inode_id)).await.unwrap();
+    let blocks =
+        r.t.db
+            .list_blocks(&format!("{}#1", plan.inode_id))
+            .await
+            .unwrap();
     assert!(blocks.iter().all(|b| b.sha256.len() == 32));
     for b in &plan.blocks {
         assert_eq!(r.cluster.locations(&b.block_id, now).len(), 2);
     }
     // The lease is free again.
-    r.t.db.acquire_path_lease(&r.t.fence, &plan.inode_id, "someone-else", now, 1_000).await.unwrap();
+    r.t.db
+        .acquire_path_lease(&r.t.fence, &plan.inode_id, "someone-else", now, 1_000)
+        .await
+        .unwrap();
 
     r.t.cleanup().await;
 }
@@ -207,25 +303,55 @@ async fn replacing_a_file_retires_the_old_version() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
     let v1 = vec![1u8; 1_500];
-    let p1 = r.uploads.start(&r.t.fence, U1, "/a.bin", 1_500, None, now).await.unwrap();
+    let p1 = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 1_500, None, now)
+        .await
+        .unwrap();
     r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &p1.inode_id, 1, &p1.lease_id, 1_500, &sha(&v1), acks(&p1, &v1), now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &p1.inode_id,
+            1,
+            &p1.lease_id,
+            1_500,
+            &sha(&v1),
+            acks(&p1, &v1),
+            now,
+        )
         .await
         .unwrap();
 
     let v2 = vec![2u8; 500];
-    let p2 = r.uploads.start(&r.t.fence, U1, "/a.bin", 500, None, now).await.unwrap();
+    let p2 = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 500, None, now)
+        .await
+        .unwrap();
     assert_eq!(p2.inode_id, p1.inode_id, "same file, new version");
     assert_eq!(p2.version_no, 2);
     // Readers still see v1 while v2 is being written.
-    assert_eq!(r.ns.stat(U1, "/a.bin").await.unwrap().size, 1_500);
+    assert_eq!(r.ns.resolve(U1, "/a.bin").await.unwrap().size, 1_500);
 
     r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &p2.inode_id, 2, &p2.lease_id, 500, &sha(&v2), acks(&p2, &v2), now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &p2.inode_id,
+            2,
+            &p2.lease_id,
+            500,
+            &sha(&v2),
+            acks(&p2, &v2),
+            now,
+        )
         .await
         .unwrap();
 
-    assert_eq!(r.ns.stat(U1, "/a.bin").await.unwrap().size, 500);
+    assert_eq!(r.ns.resolve(U1, "/a.bin").await.unwrap().size, 500);
     let old = r.t.db.get_version(&p1.inode_id, 1).await.unwrap().unwrap();
     assert_eq!(old.status, VersionStatus::Old);
 
@@ -237,44 +363,121 @@ async fn commit_rejects_bad_reports() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
     let content = vec![7u8; 1_500];
-    let plan = r.uploads.start(&r.t.fence, U1, "/a.bin", 1_500, None, now).await.unwrap();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 1_500, None, now)
+        .await
+        .unwrap();
     let good = acks(&plan, &content);
 
     // Wrong lease.
-    let e = r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, "not-my-lease", 1_500, &sha(&content), good.clone(), now)
+    let e = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            "not-my-lease",
+            1_500,
+            &sha(&content),
+            good.clone(),
+            now,
+        )
         .await;
     assert!(matches!(e, Err(MasterError::Locked)), "got {e:?}");
 
     // A block with a single copy.
     let mut one_copy = good.clone();
     one_copy[1].worker_ids.truncate(1);
-    let e = r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 1_500, &sha(&content), one_copy, now)
+    let e = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            1_500,
+            &sha(&content),
+            one_copy,
+            now,
+        )
         .await;
-    assert!(matches!(e, Err(MasterError::InvalidArgument(_))), "got {e:?}");
+    assert!(
+        matches!(e, Err(MasterError::InvalidArgument(_))),
+        "got {e:?}"
+    );
 
     // Missing block.
     let mut short = good.clone();
     short.pop();
-    let e = r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 1_500, &sha(&content), short, now)
+    let e = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            1_500,
+            &sha(&content),
+            short,
+            now,
+        )
         .await;
-    assert!(matches!(e, Err(MasterError::InvalidArgument(_))), "got {e:?}");
+    assert!(
+        matches!(e, Err(MasterError::InvalidArgument(_))),
+        "got {e:?}"
+    );
 
     // Sizes that do not add up.
     let mut wrong_size = good.clone();
     wrong_size[0].size = 999;
-    let e = r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 1_500, &sha(&content), wrong_size, now)
+    let e = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            1_500,
+            &sha(&content),
+            wrong_size,
+            now,
+        )
         .await;
-    assert!(matches!(e, Err(MasterError::InvalidArgument(_))), "got {e:?}");
+    assert!(
+        matches!(e, Err(MasterError::InvalidArgument(_))),
+        "got {e:?}"
+    );
 
     // Still pending after all that, and a good commit works.
-    let v = r.t.db.get_version(&plan.inode_id, 1).await.unwrap().unwrap();
+    let v =
+        r.t.db
+            .get_version(&plan.inode_id, 1)
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(v.status, VersionStatus::Pending);
     r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 1_500, &sha(&content), good, now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            1_500,
+            &sha(&content),
+            good,
+            now,
+        )
         .await
         .unwrap();
 
@@ -286,16 +489,46 @@ async fn commit_twice_fails_the_second_time() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
     let content = vec![7u8; 100];
-    let plan = r.uploads.start(&r.t.fence, U1, "/a.bin", 100, None, now).await.unwrap();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 100, None, now)
+        .await
+        .unwrap();
     r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 100, &sha(&content), acks(&plan, &content), now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            100,
+            &sha(&content),
+            acks(&plan, &content),
+            now,
+        )
         .await
         .unwrap();
 
-    let again = r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 100, &sha(&content), acks(&plan, &content), now)
+    let again = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            100,
+            &sha(&content),
+            acks(&plan, &content),
+            now,
+        )
         .await;
-    assert!(matches!(again, Err(MasterError::InvalidArgument(_))), "got {again:?}");
+    assert!(
+        matches!(again, Err(MasterError::InvalidArgument(_))),
+        "got {again:?}"
+    );
 
     r.t.cleanup().await;
 }
@@ -304,15 +537,38 @@ async fn commit_twice_fails_the_second_time() {
 async fn abort_of_a_new_file_leaves_no_trace_for_readers() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
-    let plan = r.uploads.start(&r.t.fence, U1, "/a.bin", 100, None, now).await.unwrap();
-
-    r.uploads
-        .abort(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, now)
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 100, None, now)
         .await
         .unwrap();
 
-    assert!(r.t.db.get_inode("root:user-1", "a.bin").await.unwrap().is_none());
-    let v = r.t.db.get_version(&plan.inode_id, 1).await.unwrap().unwrap();
+    r.uploads
+        .abort(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            now,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        r.t.db
+            .get_inode("root:user-1", "a.bin")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let v =
+        r.t.db
+            .get_version(&plan.inode_id, 1)
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(v.status, VersionStatus::Old, "the GC will free its blocks");
     // mkdir with that name works now.
     r.ns.mkdir(&r.t.fence, U1, "/a.bin", now).await.unwrap();
@@ -325,19 +581,38 @@ async fn abort_of_a_replacement_keeps_the_current_version() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
     let v1 = vec![1u8; 100];
-    let p1 = r.uploads.start(&r.t.fence, U1, "/a.bin", 100, None, now).await.unwrap();
-    r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &p1.inode_id, 1, &p1.lease_id, 100, &sha(&v1), acks(&p1, &v1), now)
+    let p1 = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 100, None, now)
         .await
         .unwrap();
-    let p2 = r.uploads.start(&r.t.fence, U1, "/a.bin", 50, None, now).await.unwrap();
+    r.uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &p1.inode_id,
+            1,
+            &p1.lease_id,
+            100,
+            &sha(&v1),
+            acks(&p1, &v1),
+            now,
+        )
+        .await
+        .unwrap();
+    let p2 = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 50, None, now)
+        .await
+        .unwrap();
 
     r.uploads
         .abort(&r.t.fence, U1, "/a.bin", &p2.inode_id, 2, &p2.lease_id, now)
         .await
         .unwrap();
 
-    let stat = r.ns.stat(U1, "/a.bin").await.unwrap();
+    let stat = r.ns.resolve(U1, "/a.bin").await.unwrap();
     assert_eq!(stat.current_version, 1);
     assert_eq!(stat.size, 100);
 
@@ -348,13 +623,26 @@ async fn abort_of_a_replacement_keeps_the_current_version() {
 async fn reassign_gives_a_fresh_block_on_other_workers() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
-    let plan = r.uploads.start(&r.t.fence, U1, "/a.bin", 1_500, None, now).await.unwrap();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 1_500, None, now)
+        .await
+        .unwrap();
     let failed = &plan.blocks[1];
     let exclude: Vec<String> = failed.workers.iter().map(|w| w.id.clone()).collect();
 
     let again = r
         .uploads
-        .reassign(&r.t.fence, U1, &plan.inode_id, 1, &plan.lease_id, 1, &exclude, now)
+        .reassign(
+            &r.t.fence,
+            U1,
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            1,
+            &exclude,
+            now,
+        )
         .await
         .unwrap();
 
@@ -362,11 +650,16 @@ async fn reassign_gives_a_fresh_block_on_other_workers() {
     assert_eq!(again.size, 500);
     assert_ne!(again.block_id, failed.block_id);
     assert!(again.workers.iter().all(|w| !exclude.contains(&w.id)));
-    let rows = r.t.db.list_blocks(&format!("{}#1", plan.inode_id)).await.unwrap();
+    let rows =
+        r.t.db
+            .list_blocks(&format!("{}#1", plan.inode_id))
+            .await
+            .unwrap();
     assert_eq!(rows[1].block_id, again.block_id);
 
     // With a stranger's lease it is refused.
-    let e = r.uploads
+    let e = r
+        .uploads
         .reassign(&r.t.fence, U1, &plan.inode_id, 1, "other", 1, &[], now)
         .await;
     assert!(matches!(e, Err(MasterError::Locked)));
@@ -379,13 +672,31 @@ async fn read_plan_lists_blocks_with_live_replicas_only() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
     let content = vec![9u8; 2_500];
-    let plan = r.uploads.start(&r.t.fence, U1, "/a.bin", 2_500, None, now).await.unwrap();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 2_500, None, now)
+        .await
+        .unwrap();
 
     // Not readable while pending.
-    assert!(matches!(r.reads.plan(U1, "/a.bin", None, now).await, Err(MasterError::NotFound)));
+    assert!(matches!(
+        r.reads.plan(U1, "/a.bin", None, now).await,
+        Err(MasterError::NotFound)
+    ));
 
     r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &plan.inode_id, 1, &plan.lease_id, 2_500, &sha(&content), acks(&plan, &content), now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            2_500,
+            &sha(&content),
+            acks(&plan, &content),
+            now,
+        )
         .await
         .unwrap();
 
@@ -397,7 +708,10 @@ async fn read_plan_lists_blocks_with_live_replicas_only() {
     for (i, b) in read.blocks.iter().enumerate() {
         assert_eq!(b.idx as usize, i);
         assert_eq!(b.block_id, plan.blocks[i].block_id);
-        assert_eq!(b.sha256, sha(&content[i * 1_000..(i * 1_000 + b.size as usize)]));
+        assert_eq!(
+            b.sha256,
+            sha(&content[i * 1_000..(i * 1_000 + b.size as usize)])
+        );
         assert_eq!(b.replicas.len(), 2);
     }
 
@@ -406,7 +720,8 @@ async fn read_plan_lists_blocks_with_live_replicas_only() {
     let later = now + 40_000;
     for w in ["a1", "a2", "b1", "b2"] {
         if w != dead {
-            r.cluster.heartbeat(hb(w, if w.starts_with('a') { "a" } else { "b" }), later);
+            r.cluster
+                .heartbeat(hb(w, if w.starts_with('a') { "a" } else { "b" }), later);
         }
     }
     let read = r.reads.plan(U1, "/a.bin", None, later).await.unwrap();
@@ -414,7 +729,8 @@ async fn read_plan_lists_blocks_with_live_replicas_only() {
     assert_ne!(&read.blocks[0].replicas[0].id, dead);
 
     // Both copies gone: the read cannot be served (503 for the gateway).
-    r.cluster.remove_location(&plan.blocks[0].block_id, &read.blocks[0].replicas[0].id);
+    r.cluster
+        .remove_location(&plan.blocks[0].block_id, &read.blocks[0].replicas[0].id);
     assert!(matches!(
         r.reads.plan(U1, "/a.bin", None, later).await,
         Err(MasterError::NoReplica(_))
@@ -428,22 +744,61 @@ async fn read_plan_can_pin_an_old_version() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
     let v1 = vec![1u8; 100];
-    let p1 = r.uploads.start(&r.t.fence, U1, "/a.bin", 100, None, now).await.unwrap();
+    let p1 = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 100, None, now)
+        .await
+        .unwrap();
     r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &p1.inode_id, 1, &p1.lease_id, 100, &sha(&v1), acks(&p1, &v1), now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &p1.inode_id,
+            1,
+            &p1.lease_id,
+            100,
+            &sha(&v1),
+            acks(&p1, &v1),
+            now,
+        )
         .await
         .unwrap();
     let v2 = vec![2u8; 50];
-    let p2 = r.uploads.start(&r.t.fence, U1, "/a.bin", 50, None, now).await.unwrap();
+    let p2 = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 50, None, now)
+        .await
+        .unwrap();
     r.uploads
-        .commit(&r.t.fence, U1, "/a.bin", &p2.inode_id, 2, &p2.lease_id, 50, &sha(&v2), acks(&p2, &v2), now)
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &p2.inode_id,
+            2,
+            &p2.lease_id,
+            50,
+            &sha(&v2),
+            acks(&p2, &v2),
+            now,
+        )
         .await
         .unwrap();
 
-    assert_eq!(r.reads.plan(U1, "/a.bin", None, now).await.unwrap().size, 50);
+    assert_eq!(
+        r.reads.plan(U1, "/a.bin", None, now).await.unwrap().size,
+        50
+    );
     // An open() handle taken before the replacement keeps reading v1.
-    assert_eq!(r.reads.plan(U1, "/a.bin", Some(1), now).await.unwrap().size, 100);
-    assert!(matches!(r.reads.plan(U1, "/a.bin", Some(9), now).await, Err(MasterError::NotFound)));
+    assert_eq!(
+        r.reads.plan(U1, "/a.bin", Some(1), now).await.unwrap().size,
+        100
+    );
+    assert!(matches!(
+        r.reads.plan(U1, "/a.bin", Some(9), now).await,
+        Err(MasterError::NotFound)
+    ));
 
     r.t.cleanup().await;
 }

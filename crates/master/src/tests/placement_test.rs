@@ -53,7 +53,10 @@ fn one_worker_is_not_enough() {
         pick_pair(&workers, &mut rng),
         Err(MasterError::NoWorkers(_))
     ));
-    assert!(matches!(pick_pair(&[], &mut rng), Err(MasterError::NoWorkers(_))));
+    assert!(matches!(
+        pick_pair(&[], &mut rng),
+        Err(MasterError::NoWorkers(_))
+    ));
 }
 
 #[test]

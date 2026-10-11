@@ -53,7 +53,9 @@ impl ReadPlanner {
         if inode.kind != InodeType::File {
             return Err(MasterError::NotFound);
         }
-        let wanted = version_no.filter(|v| *v > 0).unwrap_or(inode.current_version);
+        let wanted = version_no
+            .filter(|v| *v > 0)
+            .unwrap_or(inode.current_version);
         let version = self
             .ns
             .db()

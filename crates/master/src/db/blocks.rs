@@ -21,7 +21,11 @@ pub struct BlockRecord {
 
 impl Db {
     /// Writes (or overwrites) the rows, in fenced chunks of up to 99.
-    pub async fn put_blocks(&self, fence: &Fence, records: &[BlockRecord]) -> Result<(), MasterError> {
+    pub async fn put_blocks(
+        &self,
+        fence: &Fence,
+        records: &[BlockRecord],
+    ) -> Result<(), MasterError> {
         for chunk in records.chunks(MAX_ITEMS_PER_WRITE) {
             let mut items = Vec::with_capacity(chunk.len());
             for rec in chunk {
@@ -69,7 +73,9 @@ impl Db {
         Ok(found)
     }
 
-    /// Removes every row of a version (abort, or GC of an old version).
+    /// Removes every row of a version. Not called by the master itself: this
+    /// is for the GC (B), once the workers have dropped the blocks.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn delete_blocks(&self, fence: &Fence, version_id: &str) -> Result<(), MasterError> {
         let existing = self.list_blocks(version_id).await?;
         for chunk in existing.chunks(MAX_ITEMS_PER_WRITE) {

@@ -62,7 +62,10 @@ impl Db {
                 None => Err(MasterError::Db("update returned no attributes".into())),
             },
             Err(SdkError::ServiceError(err))
-                if matches!(err.err(), UpdateItemError::ConditionalCheckFailedException(_)) =>
+                if matches!(
+                    err.err(),
+                    UpdateItemError::ConditionalCheckFailedException(_)
+                ) =>
             {
                 Ok(None)
             }
@@ -72,7 +75,12 @@ impl Db {
 
     /// Extends the lease. False means we are no longer the holder with that
     /// fencing number: step down immediately.
-    pub async fn renew_leader(&self, fence: &Fence, now_ms: u64, ttl_ms: u64) -> Result<bool, MasterError> {
+    pub async fn renew_leader(
+        &self,
+        fence: &Fence,
+        now_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<bool, MasterError> {
         let result = self
             .client
             .update_item()
@@ -89,7 +97,10 @@ impl Db {
         match result {
             Ok(_) => Ok(true),
             Err(SdkError::ServiceError(err))
-                if matches!(err.err(), UpdateItemError::ConditionalCheckFailedException(_)) =>
+                if matches!(
+                    err.err(),
+                    UpdateItemError::ConditionalCheckFailedException(_)
+                ) =>
             {
                 Ok(false)
             }
@@ -97,6 +108,8 @@ impl Db {
         }
     }
 
+    /// Who holds the lease right now (for tests and the dashboard).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn get_leader(&self) -> Result<Option<LeaderLease>, MasterError> {
         let out = self
             .client

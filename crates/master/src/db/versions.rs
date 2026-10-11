@@ -118,6 +118,9 @@ impl Db {
 
     /// Versions in `status`, oldest update first, updated before `before_ms`.
     /// Reads the by_status index (eventually consistent, fine for a GC).
+    /// For the GC (B): OLD versions past the grace period and PENDING
+    /// uploads nobody finished.
+    #[allow(dead_code)]
     pub async fn versions_by_status(
         &self,
         status: VersionStatus,

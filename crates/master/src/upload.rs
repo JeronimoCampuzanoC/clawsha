@@ -18,7 +18,9 @@ use crate::cluster::{ClusterState, WorkerInfo};
 use crate::db::blocks::BlockRecord;
 use crate::db::inodes::{Inode, InodeType, delete_inode_item, set_current_version_item};
 use crate::db::leases::release_path_lease_item;
-use crate::db::versions::{Version, VersionStatus, commit_version_item, retire_version_item, version_id};
+use crate::db::versions::{
+    Version, VersionStatus, commit_version_item, retire_version_item, version_id,
+};
 use crate::db::{Fence, on_condition_failed};
 use crate::error::MasterError;
 use crate::namespace::Namespace;
@@ -77,17 +79,18 @@ pub struct UploadCoordinator {
 }
 
 impl UploadCoordinator {
-    pub fn new(ns: Namespace, cluster: Arc<ClusterState>, block_size: u64, replication: usize) -> Self {
+    pub fn new(
+        ns: Namespace,
+        cluster: Arc<ClusterState>,
+        block_size: u64,
+        replication: usize,
+    ) -> Self {
         Self {
             ns,
             cluster,
             block_size,
             replication,
         }
-    }
-
-    pub fn block_size(&self) -> u64 {
-        self.block_size
     }
 
     /// Sizes of the blocks of a file: all full except possibly the last.
@@ -386,11 +389,32 @@ impl UploadCoordinator {
 
         // The commit itself: all of these or none.
         let mut items = vec![
-            commit_version_item(db, inode_id, version_no, size, sha256, blocks.len() as u64, now_ms)?,
-            set_current_version_item(db, &parent.inode_id, &name, inode_id, version_no, size, now_ms)?,
+            commit_version_item(
+                db,
+                inode_id,
+                version_no,
+                size,
+                sha256,
+                blocks.len() as u64,
+                now_ms,
+            )?,
+            set_current_version_item(
+                db,
+                &parent.inode_id,
+                &name,
+                inode_id,
+                version_no,
+                size,
+                now_ms,
+            )?,
         ];
         if inode.current_version > 0 && inode.current_version != version_no {
-            items.push(retire_version_item(db, inode_id, inode.current_version, now_ms)?);
+            items.push(retire_version_item(
+                db,
+                inode_id,
+                inode.current_version,
+                now_ms,
+            )?);
         }
         let lease_item = items.len();
         items.push(release_path_lease_item(db, inode_id, lease_id)?);
@@ -401,7 +425,9 @@ impl UploadCoordinator {
             }
             MasterError::ConditionFailed(1) => MasterError::NotFound,
             MasterError::ConditionFailed(i) if i == lease_item => MasterError::Locked,
-            other => on_condition_failed(other, MasterError::Db("commit transaction failed".into())),
+            other => {
+                on_condition_failed(other, MasterError::Db("commit transaction failed".into()))
+            }
         })?;
 
         // Now the leader knows where the new blocks are, without waiting for

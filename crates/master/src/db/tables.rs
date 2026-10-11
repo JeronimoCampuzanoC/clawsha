@@ -3,6 +3,7 @@
 //! they are the reference for what Terraform must create.
 
 use aws_sdk_dynamodb::error::SdkError;
+use aws_sdk_dynamodb::operation::create_table::CreateTableError;
 use aws_sdk_dynamodb::operation::describe_table::DescribeTableError;
 use aws_sdk_dynamodb::types::{
     AttributeDefinition, BillingMode, GlobalSecondaryIndex, KeySchemaElement, KeyType, Projection,
@@ -68,28 +69,63 @@ impl Tables {
 /// PENDING uploads that never finished.
 pub const VERSIONS_BY_STATUS_INDEX: &str = "by_status";
 
+/// One key attribute: name and type.
+type KeyDef = (&'static str, ScalarAttributeType);
+/// A global secondary index: name, hash key, range key.
+type IndexDef = (&'static str, KeyDef, KeyDef);
+
 struct TableDef {
     name: String,
-    hash: (&'static str, ScalarAttributeType),
-    range: Option<(&'static str, ScalarAttributeType)>,
-    gsi: Option<(&'static str, (&'static str, ScalarAttributeType), (&'static str, ScalarAttributeType))>,
+    hash: KeyDef,
+    range: Option<KeyDef>,
+    gsi: Option<IndexDef>,
 }
 
 fn definitions(t: &Tables) -> Vec<TableDef> {
     use ScalarAttributeType::{N, S};
     vec![
-        TableDef { name: t.users(), hash: ("user_id", S), range: None, gsi: None },
-        TableDef { name: t.usernames(), hash: ("username", S), range: None, gsi: None },
-        TableDef { name: t.inodes(), hash: ("parent_id", S), range: Some(("name", S)), gsi: None },
+        TableDef {
+            name: t.users(),
+            hash: ("user_id", S),
+            range: None,
+            gsi: None,
+        },
+        TableDef {
+            name: t.usernames(),
+            hash: ("username", S),
+            range: None,
+            gsi: None,
+        },
+        TableDef {
+            name: t.inodes(),
+            hash: ("parent_id", S),
+            range: Some(("name", S)),
+            gsi: None,
+        },
         TableDef {
             name: t.versions(),
             hash: ("inode_id", S),
             range: Some(("version_no", N)),
             gsi: Some((VERSIONS_BY_STATUS_INDEX, ("status", S), ("updated_at", N))),
         },
-        TableDef { name: t.blocks(), hash: ("version_id", S), range: Some(("idx", N)), gsi: None },
-        TableDef { name: t.cluster(), hash: ("pk", S), range: None, gsi: None },
-        TableDef { name: t.path_leases(), hash: ("inode_id", S), range: None, gsi: None },
+        TableDef {
+            name: t.blocks(),
+            hash: ("version_id", S),
+            range: Some(("idx", N)),
+            gsi: None,
+        },
+        TableDef {
+            name: t.cluster(),
+            hash: ("pk", S),
+            range: None,
+            gsi: None,
+        },
+        TableDef {
+            name: t.path_leases(),
+            hash: ("inode_id", S),
+            range: None,
+            gsi: None,
+        },
     ]
 }
 
@@ -110,6 +146,7 @@ impl Db {
     }
 
     /// Drops every table. Only tests use this.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn delete_tables(&self) -> Result<(), MasterError> {
         for name in self.tables.all() {
             self.client
@@ -180,13 +217,21 @@ impl Db {
             request = request.global_secondary_indexes(gsi);
         }
 
-        request
+        let result = request
             .set_attribute_definitions(Some(attrs))
             .set_key_schema(Some(keys))
             .send()
-            .await
-            .map_err(super::sdk_error)?;
-        Ok(())
+            .await;
+        match result {
+            Ok(_) => Ok(()),
+            // The other master won the race between describe and create.
+            Err(SdkError::ServiceError(err))
+                if matches!(err.err(), CreateTableError::ResourceInUseException(_)) =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(super::sdk_error(e)),
+        }
     }
 
     async fn wait_active(&self, name: &str) -> Result<(), MasterError> {

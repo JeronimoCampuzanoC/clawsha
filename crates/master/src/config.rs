@@ -28,6 +28,11 @@ pub struct Config {
     #[arg(long, env = "MASTER_BLOCK_SIZE", default_value_t = 16 * 1024 * 1024)]
     pub block_size: u64,
 
+    /// Replication factor: copies every block must have before a commit is
+    /// accepted. 2 in the design (one per AZ); 1 only for a single-worker lab.
+    #[arg(long, env = "MASTER_REPLICATION", default_value_t = 2)]
+    pub replication: usize,
+
     /// Prefix for every DynamoDB table name, e.g. "dfsha_" -> dfsha_users.
     #[arg(long, env = "MASTER_TABLE_PREFIX", default_value = "dfsha_")]
     pub table_prefix: String,

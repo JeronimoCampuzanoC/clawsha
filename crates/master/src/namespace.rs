@@ -3,9 +3,9 @@
 //! user's root, so another user's files simply do not exist from here
 //! (NotFound, never "forbidden", so nothing leaks).
 
+use crate::db::inodes::delete_inode_item;
 use crate::db::inodes::{Inode, InodeType, root_id};
 use crate::db::versions::retire_version_item;
-use crate::db::inodes::delete_inode_item;
 use crate::db::{Db, Fence};
 use crate::error::MasterError;
 use crate::path;
@@ -90,10 +90,6 @@ impl Namespace {
         Ok((parent, name))
     }
 
-    pub async fn stat(&self, user_id: &str, path: &str) -> Result<Inode, MasterError> {
-        self.resolve(user_id, path).await
-    }
-
     pub async fn list(&self, user_id: &str, path: &str) -> Result<Vec<Inode>, MasterError> {
         let dir = self.resolve(user_id, path).await?;
         if dir.kind != InodeType::Dir {
@@ -140,13 +136,21 @@ impl Namespace {
         path::split_parent(path)?;
         let inode = self.resolve(user_id, path).await?;
 
-        if inode.kind == InodeType::Dir && !recursive && self.db.has_children(&inode.inode_id).await? {
+        if inode.kind == InodeType::Dir
+            && !recursive
+            && self.db.has_children(&inode.inode_id).await?
+        {
             return Err(MasterError::DirNotEmpty);
         }
         self.remove_inode(fence, &inode, now_ms).await
     }
 
-    async fn remove_inode(&self, fence: &Fence, inode: &Inode, now_ms: u64) -> Result<(), MasterError> {
+    async fn remove_inode(
+        &self,
+        fence: &Fence,
+        inode: &Inode,
+        now_ms: u64,
+    ) -> Result<(), MasterError> {
         if inode.kind == InodeType::Dir {
             // Box::pin because async recursion needs a known-size future.
             for child in self.db.list_children(&inode.inode_id).await? {

@@ -47,9 +47,12 @@ impl Db {
         inode_id: &str,
         lease_id: &str,
     ) -> Result<(), MasterError> {
-        self.fenced_write(fence, vec![release_path_lease_item(self, inode_id, lease_id)?])
-            .await
-            .map_err(|e| on_condition_failed(e, MasterError::Locked))
+        self.fenced_write(
+            fence,
+            vec![release_path_lease_item(self, inode_id, lease_id)?],
+        )
+        .await
+        .map_err(|e| on_condition_failed(e, MasterError::Locked))
     }
 }
 

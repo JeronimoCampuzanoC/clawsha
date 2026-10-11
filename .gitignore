@@ -31,3 +31,6 @@ bench/results/
 .DS_Store
 .idea/
 .vscode/
+
+# DynamoDB Local downloaded by scripts/dev/dynamodb-local.sh
+.dynamodb-local/

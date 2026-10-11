@@ -13,10 +13,9 @@ pub struct TestDb {
     pub fence: Fence,
 }
 
-/// Fresh tables under a random prefix, with the leader lease already taken by
-/// "test-master" so fenced writes work. Returns None when there is no local
-/// DynamoDB to talk to.
-pub async fn test_db() -> Option<TestDb> {
+/// Fresh, empty tables under a random prefix. Returns None when there is no
+/// local DynamoDB to talk to.
+pub async fn test_tables() -> Option<Db> {
     let Ok(endpoint) = std::env::var("DFSHA_TEST_DYNAMO_ENDPOINT") else {
         eprintln!("skipping: DFSHA_TEST_DYNAMO_ENDPOINT is not set");
         return None;
@@ -27,6 +26,13 @@ pub async fn test_db() -> Option<TestDb> {
         .await
         .expect("connect to dynamodb-local");
     db.create_tables().await.expect("create tables");
+    Some(db)
+}
+
+/// Fresh tables with the leader lease already taken by "test-master" so
+/// fenced writes work.
+pub async fn test_db() -> Option<TestDb> {
+    let db = test_tables().await?;
 
     let lease = db
         .try_acquire_leader("test-master", "127.0.0.1:50051", now_ms(), 60_000)

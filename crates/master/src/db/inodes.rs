@@ -54,7 +54,11 @@ pub fn root_id(user_id: &str) -> String {
 }
 
 impl Db {
-    pub async fn get_inode(&self, parent_id: &str, name: &str) -> Result<Option<Inode>, MasterError> {
+    pub async fn get_inode(
+        &self,
+        parent_id: &str,
+        name: &str,
+    ) -> Result<Option<Inode>, MasterError> {
         let out = self
             .client
             .get_item()
@@ -126,9 +130,12 @@ impl Db {
         name: &str,
         inode_id: &str,
     ) -> Result<(), MasterError> {
-        self.fenced_write(fence, vec![delete_inode_item(self, parent_id, name, inode_id)?])
-            .await
-            .map_err(|e| on_condition_failed(e, MasterError::NotFound))
+        self.fenced_write(
+            fence,
+            vec![delete_inode_item(self, parent_id, name, inode_id)?],
+        )
+        .await
+        .map_err(|e| on_condition_failed(e, MasterError::NotFound))
     }
 
     /// Moves `inode` to (new_parent, new_name) in one transaction: the new row

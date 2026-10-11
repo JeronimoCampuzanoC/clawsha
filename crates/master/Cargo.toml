@@ -16,7 +16,7 @@ prost = "0.14"
 rand = "0.10.3"
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "time", "sync", "signal"] }
-tokio-stream = "0.1.19"
+tokio-stream = { version = "0.1.19", features = ["net"] }
 tonic = "0.14"
 tonic-prost = "0.14"
 tracing = "0.1.44"
@@ -27,4 +27,9 @@ uuid = { version = "1.28.0", features = ["v4"] }
 tonic-prost-build = "0.14"
 
 [dev-dependencies]
+bytes = "1.12.1"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["client", "http1"] }
+hyper-util = "0.1.21"
 sha2 = "0.11.0"
+tower = "0.5.3"

@@ -98,7 +98,11 @@ impl Leadership {
                     Ok(Transition::SteppedDown)
                 }
             }
-            None => match self.db.try_acquire_leader(&self.me, &self.addr, now_ms, ttl_ms).await? {
+            None => match self
+                .db
+                .try_acquire_leader(&self.me, &self.addr, now_ms, ttl_ms)
+                .await?
+            {
                 Some(lease) => {
                     // Whatever we knew about the workers is from another term.
                     // They will see the new fencing and report everything again.

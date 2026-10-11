@@ -59,7 +59,13 @@ impl Db {
         if let Some(endpoint) = endpoint {
             loader = loader
                 .endpoint_url(endpoint)
-                .credentials_provider(Credentials::new("local", "local", None, None, "dfsha-local"));
+                .credentials_provider(Credentials::new(
+                    "local",
+                    "local",
+                    None,
+                    None,
+                    "dfsha-local",
+                ));
         }
         let shared = loader.load().await;
 
@@ -67,14 +73,6 @@ impl Db {
             client: Client::new(&shared),
             tables: Arc::new(Tables::new(table_prefix)),
         })
-    }
-
-    pub fn tables(&self) -> &Tables {
-        &self.tables
-    }
-
-    pub(crate) fn client(&self) -> &Client {
-        &self.client
     }
 
     /// Runs `items` as one transaction guarded by the leader fence.
@@ -156,7 +154,9 @@ pub(crate) fn build_error(e: aws_sdk_dynamodb::error::BuildError) -> MasterError
     MasterError::Db(format!("bad request: {e}"))
 }
 
-pub(crate) fn sdk_error<E: std::fmt::Display, R: std::fmt::Debug>(e: SdkError<E, R>) -> MasterError {
+pub(crate) fn sdk_error<E: std::fmt::Display, R: std::fmt::Debug>(
+    e: SdkError<E, R>,
+) -> MasterError {
     match e {
         SdkError::ServiceError(err) => MasterError::Db(err.err().to_string()),
         other => MasterError::Db(other.to_string()),
