@@ -61,6 +61,10 @@ cp crates/master/.env.example crates/master/.env   # apunta a localhost:8000 y c
 cargo run -p master
 ```
 
+El binario busca el `.env` en el directorio actual y, si no está, en
+`crates/master/`, así que da igual desde dónde lo corras. Sin `.env` hay que
+pasar al menos `--id`: `cargo run -p master -- --id master-a --dynamodb-endpoint http://localhost:8000 --create-tables`.
+
 Deberías ver `master up, waiting for the leader lease` y enseguida
 `became leader fencing=1`. Puertos: gRPC 50051, health 8080.
 

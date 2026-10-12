@@ -38,7 +38,7 @@ scripts/dev/dynamodb-local.sh
 scripts/dev/test-master.sh
 
 # 3. un master de verdad
-cp crates/master/.env.example crates/master/.env
+cp crates/master/.env.example crates/master/.env   # el binario lo encuentra desde cualquier directorio
 cargo run -p master
 curl localhost:8080/health/leader              # 200 = este master es el líder
 

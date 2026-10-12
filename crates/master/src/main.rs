@@ -30,8 +30,11 @@ use db::Db;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Load .env if it exists; real environment variables and CLI args still win.
+    // Load a .env if there is one: first from the current directory, then
+    // from this crate's own folder, so `cargo run -p master` works from the
+    // repository root too. Real environment variables and CLI args still win.
     dotenvy::dotenv().ok();
+    dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/.env")).ok();
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
