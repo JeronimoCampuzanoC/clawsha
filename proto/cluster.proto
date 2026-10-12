@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package dfs.v1;
+
+import "common.proto";
+
+// ---------------------------------------------------------------------------
+// ClusterService: worker -> master. Owner: A (contract) / B (worker side).
+// ---------------------------------------------------------------------------
+service ClusterService {
+  // Every 3 s. Carries usage and the blocks added/removed since the previous
+  // heartbeat. The answer tells the worker the current leader fencing; when it
+  // changes, or when full_report_requested is set, the worker sends BlockReport.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Full list of blocks on disk. Sent at startup, every 5 min and whenever the
+  // fencing changes. This is the source of truth for block locations.
+  rpc BlockReport(BlockReportRequest) returns (Empty);
+}
+
+// ----- cluster -------------------------------------------------------------
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  string addr = 2;          // host:port where the worker serves WorkerService
+  string az = 3;
+  uint64 quota_bytes = 4;
+  uint64 used_bytes = 5;
+  repeated string new_blocks = 6;       // since the previous heartbeat
+  repeated string removed_blocks = 7;
+  string data_dir = 8;      // optional, only to show disk paths in stat
+}
+
+message HeartbeatResponse {
+  uint64 fencing = 1;
+  bool full_report_requested = 2;   // the leader does not know this worker yet
+}
+
+message BlockEntry {
+  string block_id = 1;
+  uint64 size = 2;
+  bytes sha256 = 3;
+}
+
+message BlockReportRequest {
+  string worker_id = 1;
+  repeated BlockEntry blocks = 2;
+}

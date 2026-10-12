@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package dfs.v1;
+
+// Types shared by more than one service.
+
+message Empty {}
+
+message WorkerAddr {
+  string worker_id = 1;
+  string addr = 2;          // host:port of the worker's gRPC endpoint
+  string az = 3;
+}

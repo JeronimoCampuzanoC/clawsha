@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package dfs.v1;
+
+// ---------------------------------------------------------------------------
+// WorkerService: what a worker (DataNode) offers to gateways, the master and
+// other workers. Owner: B.
+// ---------------------------------------------------------------------------
+service WorkerService {
+  // Client streams one block: first frame is the header, the rest are data.
+  rpc PutBlock(stream BlockFrame) returns (PutBlockResponse);
+
+  // Server streams one block back, starting at `offset`.
+  rpc GetBlock(GetBlockRequest) returns (stream BlockFrame);
+
+  // Master order: send your copy of a block to another worker.
+  rpc ReplicateBlock(ReplicateBlockRequest) returns (ReplicateBlockResponse);
+
+  // Master order: delete a block.
+  rpc DeleteBlock(DeleteBlockRequest) returns (DeleteBlockResponse);
+}
+
+message BlockFrame {
+  oneof kind {
+    BlockHeader header = 1;
+    DataFrame data = 2;
+  }
+}
+
+message BlockHeader {
+  string block_id = 1;      // UUID
+  bytes sha256 = 2;         // raw digest, exactly 32 bytes
+  uint64 size = 3;          // total block size in bytes
+  string next_worker = 4;   // pipeline: address of the next worker, empty if last
+  bool overwrite = 5;       // true to replace an existing (corrupted) copy
+}
+
+message DataFrame {
+  bytes data = 1;           // up to frame_size bytes
+  fixed32 crc32c = 2;       // P2: checksum of this frame, 0 = not set
+}
+
+message PutBlockResponse {
+  string block_id = 1;
+  uint64 stored_bytes = 2;
+}
+
+message GetBlockRequest {
+  string block_id = 1;
+  uint64 offset = 2;        // byte to start reading from
+}
+
+message ReplicateBlockRequest {
+  string block_id = 1;
+  string target = 2;        // host:port of the worker that must receive the copy
+  uint64 fencing = 3;       // fencing token of the leader that sends the order
+  bool overwrite = 4;       // true when the target already has a corrupted copy
+}
+
+message ReplicateBlockResponse {
+  uint64 sent_bytes = 1;
+}
+
+message DeleteBlockRequest {
+  string block_id = 1;
+  uint64 fencing = 2;       // fencing token of the leader that sends the order
+}
+
+message DeleteBlockResponse {
+  uint64 freed_bytes = 1;   // 0 if the block was already gone
+}

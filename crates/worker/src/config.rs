@@ -24,4 +24,8 @@ pub struct Config {
     /// Storage quota in bytes (default 2 GiB).
     #[arg(long, env = "WORKER_QUOTA_BYTES", default_value_t = 2_147_483_648)]
     pub quota_bytes: u64,
+
+    /// Maximum size of a single frame in bytes (default 256 KiB, max 1 MiB).
+    #[arg(long,env = "WORKER_FRAME_SIZE",default_value_t = 262_144,value_parser = clap::value_parser!(u32).range(1..=1_048_576))]
+    pub frame_size: u32,
 }

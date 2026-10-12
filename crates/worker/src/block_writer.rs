@@ -17,6 +17,7 @@ pub struct BlockWriter {
     written: u64,
     finished: bool,
     used_bytes: Arc<AtomicU64>,
+    overwrite: bool,
 }
 
 impl BlockWriter {
@@ -27,6 +28,7 @@ impl BlockWriter {
         expected_size: u64,
         expected_sha256: [u8; 32],
         used_bytes: Arc<AtomicU64>,
+        overwrite: bool,
     ) -> Self {
         Self {
             file,
@@ -38,6 +40,7 @@ impl BlockWriter {
             written: 0,
             finished: false,
             used_bytes,
+            overwrite,
         }
     }
 
@@ -85,9 +88,15 @@ impl BlockWriter {
             .parent()
             .expect("final path always has a parent directory");
 
-        if self.final_path.exists() {
-            return Err(StorageError::AlreadyExists);
-        }
+        // A normal write refuses to replace a block; a repair is allowed to.
+        let replaced_size = if self.overwrite {
+            fs::metadata(&self.final_path).map(|m| m.len()).unwrap_or(0)
+        } else {
+            if self.final_path.exists() {
+                return Err(StorageError::AlreadyExists);
+            }
+            0
+        };
 
         // The shard directory can be pruned between create_dir_all and the
         // write/rename, so retry a few times.
@@ -106,6 +115,9 @@ impl BlockWriter {
             }
         }
         self.finished = true;
+
+        // The old copy is gone: give its space back.
+        self.used_bytes.fetch_sub(replaced_size, Ordering::SeqCst);
 
         File::open(parent)?.sync_all()?;
         Ok(())

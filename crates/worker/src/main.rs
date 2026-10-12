@@ -1,6 +1,8 @@
 mod block_writer;
 mod config;
 mod error;
+mod fencing;
+mod service;
 mod storage;
 #[cfg(test)]
 mod tests;

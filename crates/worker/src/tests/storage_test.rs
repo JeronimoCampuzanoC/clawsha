@@ -502,3 +502,81 @@ fn verify_works_on_a_multi_chunk_block() {
 
     storage.verify_block(ID).unwrap();
 }
+
+#[test]
+fn overwrite_replaces_a_corrupted_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"hello"]).unwrap();
+    fs::write(storage.block_path(ID).unwrap(), b"jello").unwrap();
+
+    let mut writer = storage.begin_overwrite(ID, 5, sha(b"hello")).unwrap();
+    writer.write_chunk(b"hello").unwrap();
+    writer.finish().unwrap();
+
+    storage.verify_block(ID).unwrap();
+}
+
+#[test]
+fn overwrite_does_not_double_count_the_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf()).with_quota(100);
+    put(&storage, ID, &[b"hello"]).unwrap();
+
+    let mut writer = storage.begin_overwrite(ID, 5, sha(b"hello")).unwrap();
+    writer.write_chunk(b"hello").unwrap();
+    writer.finish().unwrap();
+
+    assert_eq!(storage.used_bytes(), 5);
+}
+
+#[test]
+fn overwrite_with_a_smaller_block_gives_the_difference_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"0123456789"]).unwrap();
+
+    let mut writer = storage.begin_overwrite(ID, 4, sha(b"abcd")).unwrap();
+    writer.write_chunk(b"abcd").unwrap();
+    writer.finish().unwrap();
+
+    assert_eq!(storage.used_bytes(), 4);
+}
+
+#[test]
+fn overwrite_of_a_missing_block_acts_like_a_normal_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+
+    let mut writer = storage.begin_overwrite(ID, 5, sha(b"hello")).unwrap();
+    writer.write_chunk(b"hello").unwrap();
+    writer.finish().unwrap();
+
+    storage.verify_block(ID).unwrap();
+    assert_eq!(storage.used_bytes(), 5);
+}
+
+#[test]
+fn failed_overwrite_keeps_the_old_block_and_its_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"hello"]).unwrap();
+
+    let mut writer = storage.begin_overwrite(ID, 5, sha(b"other")).unwrap();
+    writer.write_chunk(b"hello").unwrap();
+    assert!(writer.finish().is_err());
+
+    assert_eq!(fs::read(storage.block_path(ID).unwrap()).unwrap(), b"hello");
+    assert_eq!(storage.used_bytes(), 5);
+}
+
+#[test]
+fn normal_write_still_refuses_an_existing_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+    put(&storage, ID, &[b"data"]).unwrap();
+
+    let result = storage.begin_write(ID, 4, sha(b"data"));
+
+    assert!(matches!(result, Err(StorageError::AlreadyExists)));
+}
