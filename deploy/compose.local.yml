@@ -1,0 +1,58 @@
+# Local cluster for development: DynamoDB Local plus two masters that compete
+# for the leader lease. Workers and the gateway get added by B and C.
+#
+#   docker compose -f deploy/compose.local.yml up --build
+#   curl localhost:8081/health/leader   # 200 on the leader, 503 on the standby
+#   curl localhost:8082/health/leader
+#
+# Only the database is needed to run the master tests from the host:
+#   docker compose -f deploy/compose.local.yml up -d dynamodb
+#   scripts/dev/test-master.sh
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    ports:
+      - "8000:8000"
+
+  master-a:
+    build:
+      context: ..
+      dockerfile: deploy/docker/master.Dockerfile
+    environment:
+      MASTER_ID: master-a
+      MASTER_AZ: a
+      MASTER_ADVERTISE_ADDR: master-a:50051
+      MASTER_DYNAMODB_ENDPOINT: http://dynamodb:8000
+      MASTER_CREATE_TABLES: "true"
+      # The SDK wants some credentials even for the local endpoint.
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_REGION: us-east-1
+      RUST_LOG: info
+    ports:
+      - "50051:50051"
+      - "8081:8080"
+    depends_on:
+      - dynamodb
+
+  master-b:
+    build:
+      context: ..
+      dockerfile: deploy/docker/master.Dockerfile
+    environment:
+      MASTER_ID: master-b
+      MASTER_AZ: b
+      MASTER_ADVERTISE_ADDR: master-b:50051
+      MASTER_DYNAMODB_ENDPOINT: http://dynamodb:8000
+      MASTER_CREATE_TABLES: "true"
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_REGION: us-east-1
+      RUST_LOG: info
+    ports:
+      - "50052:50051"
+      - "8082:8080"
+    depends_on:
+      - dynamodb
