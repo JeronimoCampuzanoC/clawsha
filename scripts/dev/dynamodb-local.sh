@@ -11,6 +11,15 @@ PORT="${PORT:-8000}"
 DIR="$(cd "$(dirname "$0")/../.." && pwd)/.dynamodb-local"
 URL="https://d1ni2b6xgvw0s0.cloudfront.net/v2.x/dynamodb_local_latest.tar.gz"
 
+# Something already listening there is almost always a previous copy of this
+# same server; say so instead of dying with a Java stack trace.
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "port $PORT is already in use:" >&2
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN | tail -n +2 >&2
+  echo "if that is an old DynamoDB Local, stop it with: kill <PID>" >&2
+  exit 1
+fi
+
 JAVA="${JAVA:-java}"
 if ! command -v "$JAVA" >/dev/null 2>&1; then
   if [ -x /opt/homebrew/opt/openjdk/bin/java ]; then
