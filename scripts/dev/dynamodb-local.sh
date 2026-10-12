@@ -20,15 +20,19 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   exit 1
 fi
 
-JAVA="${JAVA:-java}"
-if ! command -v "$JAVA" >/dev/null 2>&1; then
+# Prefer Homebrew's JDK: on macOS a bare `java` can be the system stub, which
+# exists but only prints "Unable to locate a Java Runtime".
+if [ -z "${JAVA:-}" ]; then
   if [ -x /opt/homebrew/opt/openjdk/bin/java ]; then
     JAVA=/opt/homebrew/opt/openjdk/bin/java
   else
-    echo "java not found. Install it (brew install openjdk) or use docker: " >&2
-    echo "  docker run --rm -p 8000:8000 amazon/dynamodb-local -jar DynamoDBLocal.jar -inMemory -sharedDb" >&2
-    exit 1
+    JAVA=java
   fi
+fi
+if ! "$JAVA" -version >/dev/null 2>&1; then
+  echo "no working java found ($JAVA). Install it (brew install openjdk) or use docker:" >&2
+  echo "  docker run --rm -p 8000:8000 amazon/dynamodb-local -jar DynamoDBLocal.jar -inMemory -sharedDb" >&2
+  exit 1
 fi
 
 if [ ! -f "$DIR/DynamoDBLocal.jar" ]; then
