@@ -40,7 +40,8 @@ impl Db {
         Ok(expires_at)
     }
 
-    /// Releases the lease if we hold it; Locked if somebody else does.
+    /// Releases the lease. Fine if it is already gone (a retry after a lost
+    /// reply); Locked if somebody else holds it now.
     pub async fn release_path_lease(
         &self,
         fence: &Fence,
@@ -66,7 +67,7 @@ pub(crate) fn release_path_lease_item(
     let delete = Delete::builder()
         .table_name(db.tables.path_leases())
         .key("inode_id", s(inode_id))
-        .condition_expression("holder = :me")
+        .condition_expression("attribute_not_exists(inode_id) OR holder = :me")
         .expression_attribute_values(":me", s(lease_id))
         .build()
         .map_err(build_error)?;

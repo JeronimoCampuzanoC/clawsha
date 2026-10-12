@@ -44,6 +44,43 @@ pub struct Fence {
 /// Fenced transactions can carry 100 items; one of them is the fence check.
 pub const MAX_ITEMS_PER_WRITE: usize = 99;
 
+/// Two transactions touching the same item at the same time cancel one of
+/// them with TransactionConflict. Every fenced write touches the `leader`
+/// row, so under load (a gateway writing 4 blocks in parallel, the 3 s
+/// renewal) this happens now and then. Nothing is written when a
+/// transaction cancels, so retrying is safe.
+const CONFLICT_RETRIES: usize = 3;
+
+/// Why DynamoDB cancelled a fenced transaction, from its CancellationReasons
+/// (one per item, in the order sent; item 0 is the fence check).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cancellation {
+    /// The fence check failed: another master holds the lease.
+    Fenced,
+    /// The condition of the caller's i-th item failed.
+    ConditionFailed(usize),
+    /// Only conflicts with concurrent transactions: retry.
+    Conflict,
+    Other,
+}
+
+pub fn classify_cancellation(codes: &[Option<&str>]) -> Cancellation {
+    if let Some(i) = codes
+        .iter()
+        .position(|c| *c == Some("ConditionalCheckFailed"))
+    {
+        return if i == 0 {
+            Cancellation::Fenced
+        } else {
+            Cancellation::ConditionFailed(i - 1)
+        };
+    }
+    if codes.contains(&Some("TransactionConflict")) {
+        return Cancellation::Conflict;
+    }
+    Cancellation::Other
+}
+
 #[derive(Clone)]
 pub struct Db {
     client: Client,
@@ -108,43 +145,55 @@ impl Db {
         all.push(TransactWriteItem::builder().condition_check(check).build());
         all.extend(items);
 
-        let result = self
-            .client
-            .transact_write_items()
-            .set_transact_items(Some(all))
-            .send()
-            .await;
+        for attempt in 1..=CONFLICT_RETRIES {
+            let result = self
+                .client
+                .transact_write_items()
+                .set_transact_items(Some(all.clone()))
+                .send()
+                .await;
 
-        match result {
-            Ok(_) => Ok(()),
-            Err(SdkError::ServiceError(err)) => match err.into_err() {
-                TransactWriteItemsError::TransactionCanceledException(cancelled) => {
-                    // One reason per item, in the same order we sent them.
-                    let failed: Vec<usize> = cancelled
-                        .cancellation_reasons()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, r)| r.code() == Some("ConditionalCheckFailed"))
-                        .map(|(i, _)| i)
-                        .collect();
-                    match failed.first() {
-                        Some(0) => Err(MasterError::Fenced),
-                        Some(i) => Err(MasterError::ConditionFailed(i - 1)),
-                        None => Err(MasterError::Db(format!(
-                            "transaction cancelled: {}",
-                            cancelled
-                                .cancellation_reasons()
-                                .iter()
-                                .filter_map(|r| r.code())
-                                .collect::<Vec<_>>()
-                                .join(",")
-                        ))),
-                    }
+            let cancelled = match result {
+                Ok(_) => return Ok(()),
+                Err(SdkError::ServiceError(err)) => match err.into_err() {
+                    TransactWriteItemsError::TransactionCanceledException(c) => c,
+                    other => return Err(MasterError::Db(other.to_string())),
+                },
+                Err(other) => return Err(MasterError::Db(other.to_string())),
+            };
+
+            let codes: Vec<Option<&str>> = cancelled
+                .cancellation_reasons()
+                .iter()
+                .map(|r| r.code())
+                .collect();
+            match classify_cancellation(&codes) {
+                Cancellation::Fenced => return Err(MasterError::Fenced),
+                Cancellation::ConditionFailed(i) => return Err(MasterError::ConditionFailed(i)),
+                Cancellation::Conflict if attempt < CONFLICT_RETRIES => {
+                    // A little random wait so the two sides do not collide again.
+                    let wait = 20 + rand::random_range(0..60u64);
+                    tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
                 }
-                other => Err(MasterError::Db(other.to_string())),
-            },
-            Err(other) => Err(MasterError::Db(other.to_string())),
+                Cancellation::Conflict => {
+                    return Err(MasterError::Db(
+                        "transaction conflict after retries, try again".to_string(),
+                    ));
+                }
+                Cancellation::Other => {
+                    return Err(MasterError::Db(format!(
+                        "transaction cancelled: {}",
+                        codes
+                            .iter()
+                            .flatten()
+                            .copied()
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )));
+                }
+            }
         }
+        unreachable!("the loop returns on every path")
     }
 }
 

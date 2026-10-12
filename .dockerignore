@@ -1,0 +1,8 @@
+# Keep the Docker build context small: no build artifacts, no git, no state.
+target/
+**/target/
+**/node_modules/
+.git/
+.dynamodb-local/
+infra/**/.terraform/
+*.tfstate*

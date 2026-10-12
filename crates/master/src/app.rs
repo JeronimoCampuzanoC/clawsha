@@ -17,6 +17,8 @@ pub struct App {
     pub uploads: UploadCoordinator,
     pub reads: ReadPlanner,
     pub block_size: u64,
+    /// Replication factor: how many copies a block should have.
+    pub replication: usize,
 }
 
 impl App {
@@ -48,6 +50,7 @@ impl App {
             leadership,
             db,
             block_size,
+            replication,
         }
     }
 }

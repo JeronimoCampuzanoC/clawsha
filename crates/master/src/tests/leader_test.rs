@@ -103,6 +103,33 @@ async fn standby_takes_over_when_the_lease_expires_and_old_leader_steps_down() {
 }
 
 #[tokio::test]
+async fn fence_expires_when_renewals_stop_landing() {
+    let Some(t) = test_db().await else { return };
+    let now = now_ms() + 61_000;
+    let a = Leadership::new(
+        t.db.clone(),
+        "master-a",
+        "a:50051",
+        Arc::new(ClusterState::new()),
+    );
+    a.tick(now, TTL).await.unwrap();
+
+    // Within the TTL we still lead...
+    assert!(a.fence_at(now + TTL - 1).is_some());
+    assert!(a.is_leader_at(now + TTL - 1));
+    // ...but if DynamoDB has been unreachable for a whole TTL, the standby
+    // may already hold the lease: stop acting and stop answering 200.
+    assert!(a.fence_at(now + TTL + 1).is_none());
+    assert!(!a.is_leader_at(now + TTL + 1));
+
+    // A successful renewal extends it again.
+    a.tick(now + 3_000, TTL).await.unwrap();
+    assert!(a.fence_at(now + TTL + 1).is_some());
+
+    t.cleanup().await;
+}
+
+#[tokio::test]
 async fn becoming_leader_starts_with_an_empty_cluster_view_in_safe_mode() {
     let Some(t) = test_db().await else { return };
     let now = now_ms() + 61_000;

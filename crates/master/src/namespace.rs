@@ -136,11 +136,13 @@ impl Namespace {
         path::split_parent(path)?;
         let inode = self.resolve(user_id, path).await?;
 
-        if inode.kind == InodeType::Dir
-            && !recursive
-            && self.db.has_children(&inode.inode_id).await?
-        {
-            return Err(MasterError::DirNotEmpty);
+        // "Empty" means what ls shows: hidden entries left by unfinished
+        // uploads do not count, and go away with the directory.
+        if inode.kind == InodeType::Dir && !recursive {
+            let children = self.db.list_children(&inode.inode_id).await?;
+            if children.iter().any(visible) {
+                return Err(MasterError::DirNotEmpty);
+            }
         }
         self.remove_inode(fence, &inode, now_ms).await
     }

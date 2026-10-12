@@ -52,16 +52,14 @@ fn worker_addr(w: &WorkerInfo) -> pb::WorkerAddr {
 /// worker uses (blocks/ab/cd/<uuid>). Only for the detail panel; the master
 /// never opens these paths.
 fn disk_path(w: &WorkerInfo, block_id: &str) -> String {
-    if w.data_dir.is_empty() || block_id.len() < 4 {
-        return String::new();
+    match (
+        w.data_dir.is_empty(),
+        block_id.get(0..2),
+        block_id.get(2..4),
+    ) {
+        (false, Some(ab), Some(cd)) => format!("{}/blocks/{}/{}/{}", w.data_dir, ab, cd, block_id),
+        _ => String::new(),
     }
-    format!(
-        "{}/blocks/{}/{}/{}",
-        w.data_dir,
-        &block_id[0..2],
-        &block_id[2..4],
-        block_id
-    )
 }
 
 fn entry(inode: &Inode) -> pb::Entry {
@@ -496,7 +494,7 @@ impl MasterService for MasterApi {
             fencing: leadership.fencing(),
             safe_mode: leadership.safe_mode(now),
             workers,
-            under_replicated_blocks: self.app.cluster.under_replicated(2),
+            under_replicated_blocks: self.app.cluster.under_replicated(self.app.replication),
             total_blocks: self.app.cluster.total_blocks(),
         }))
     }

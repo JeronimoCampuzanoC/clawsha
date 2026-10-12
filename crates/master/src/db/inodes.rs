@@ -100,21 +100,6 @@ impl Db {
         Ok(found)
     }
 
-    pub async fn has_children(&self, parent_id: &str) -> Result<bool, MasterError> {
-        let out = self
-            .client
-            .query()
-            .table_name(self.tables.inodes())
-            .key_condition_expression("parent_id = :p")
-            .expression_attribute_values(":p", s(parent_id))
-            .consistent_read(true)
-            .limit(1)
-            .send()
-            .await
-            .map_err(sdk_error)?;
-        Ok(out.count() > 0)
-    }
-
     /// Creates the entry; fails with AlreadyExists if the name is taken.
     pub async fn put_inode(&self, fence: &Fence, inode: &Inode) -> Result<(), MasterError> {
         self.fenced_write(fence, vec![put_inode_item(self, inode)?])
@@ -204,6 +189,8 @@ pub(crate) fn delete_inode_item(
 }
 
 /// Points a file at a newly committed version. Part of the commit transaction.
+/// The `current_version < :v` condition is what stops a writer whose lease
+/// expired from publishing an older version over a newer one.
 pub(crate) fn set_current_version_item(
     db: &Db,
     parent_id: &str,
@@ -218,7 +205,7 @@ pub(crate) fn set_current_version_item(
         .table_name(db.tables.inodes())
         .key("parent_id", s(parent_id))
         .key("name", s(name))
-        .condition_expression("inode_id = :id")
+        .condition_expression("inode_id = :id AND current_version < :v")
         .update_expression("SET current_version = :v, #size = :size, modified_at = :now")
         .expression_attribute_names("#size", "size")
         .expression_attribute_values(":id", s(inode_id))

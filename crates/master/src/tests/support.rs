@@ -1,9 +1,9 @@
 //! Shared setup for the tests that talk to DynamoDB.
 //!
-//! They need dynamodb-local running (see deploy/compose.local.yml) and the
-//! endpoint in DFSHA_TEST_DYNAMO_ENDPOINT, e.g. http://localhost:8000. Without
-//! the variable they print a note and pass, so `cargo test` still works on a
-//! machine without Docker. CI sets the variable.
+//! They need dynamodb-local running (scripts/dev/dynamodb-local.sh or the
+//! compose file) and the endpoint in DFSHA_TEST_DYNAMO_ENDPOINT, e.g.
+//! http://localhost:8000. Without it they fail with instructions, unless
+//! DFSHA_SKIP_DB_TESTS is set. CI sets the endpoint.
 
 use crate::db::{Db, Fence};
 use crate::time::now_ms;
@@ -17,8 +17,17 @@ pub struct TestDb {
 /// local DynamoDB to talk to.
 pub async fn test_tables() -> Option<Db> {
     let Ok(endpoint) = std::env::var("DFSHA_TEST_DYNAMO_ENDPOINT") else {
-        eprintln!("skipping: DFSHA_TEST_DYNAMO_ENDPOINT is not set");
-        return None;
+        // A silent skip would make `cargo test` look green on a machine
+        // without the database, so skipping has to be asked for explicitly.
+        if std::env::var_os("DFSHA_SKIP_DB_TESTS").is_some() {
+            eprintln!("skipping: DFSHA_TEST_DYNAMO_ENDPOINT is not set");
+            return None;
+        }
+        panic!(
+            "this test needs DynamoDB Local. Start one with scripts/dev/dynamodb-local.sh and set \
+             DFSHA_TEST_DYNAMO_ENDPOINT=http://localhost:8000 (scripts/dev/test-master.sh does both), \
+             or set DFSHA_SKIP_DB_TESTS=1 to skip the database tests on purpose."
+        );
     };
 
     let prefix = format!("t{}_", &uuid::Uuid::new_v4().simple().to_string()[..8]);

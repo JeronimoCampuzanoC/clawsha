@@ -30,6 +30,11 @@ use crate::placement;
 /// the path. The gateway renews every 20 s while the upload runs.
 pub const PATH_LEASE_TTL_MS: u64 = 60_000;
 
+/// Hard cap on blocks per file: 1 TiB at 16 MiB. The size comes from the
+/// client's Content-Length, so without a cap one request could make us
+/// allocate a plan of billions of blocks.
+pub const MAX_BLOCKS_PER_FILE: usize = 65_536;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockAssignment {
     pub idx: u32,
@@ -94,22 +99,34 @@ impl UploadCoordinator {
     }
 
     /// Sizes of the blocks of a file: all full except possibly the last.
-    fn block_sizes(&self, total: u64) -> Vec<u64> {
-        let mut sizes = Vec::new();
+    /// Refuses files that would need more than MAX_BLOCKS_PER_FILE blocks.
+    fn block_sizes(&self, total: u64) -> Result<Vec<u64>, MasterError> {
+        let count = total.div_ceil(self.block_size);
+        if count > MAX_BLOCKS_PER_FILE as u64 {
+            return Err(MasterError::InvalidArgument(format!(
+                "{total} bytes would need {count} blocks; the limit is {MAX_BLOCKS_PER_FILE}"
+            )));
+        }
+        let mut sizes = Vec::with_capacity(count as usize);
         let mut left = total;
         while left > 0 {
             let size = left.min(self.block_size);
             sizes.push(size);
             left -= size;
         }
-        sizes
+        Ok(sizes)
     }
 
-    /// Workers that can take new blocks right now. A worker needs room for
-    /// two more blocks to count, so a single assignment never fills it up.
+    /// Room a worker must have to receive a block: two blocks, so a single
+    /// assignment never fills it to the brim.
+    fn min_free(&self) -> u64 {
+        2 * self.block_size
+    }
+
+    /// Workers that can take new blocks right now.
     fn candidates(&self, now_ms: u64, exclude: &[String]) -> Vec<WorkerInfo> {
         self.cluster
-            .write_candidates(now_ms, 2 * self.block_size)
+            .write_candidates(now_ms, self.min_free())
             .into_iter()
             .filter(|w| !exclude.contains(&w.id))
             .collect()
@@ -117,7 +134,8 @@ impl UploadCoordinator {
 
     /// One pair per block. As we assign, we charge the bytes to the chosen
     /// workers in our local copy, so a 1 GiB file does not land entirely on
-    /// the worker that happened to be emptiest at the start.
+    /// the worker that happened to be emptiest at the start, and a worker
+    /// that runs out of room along the way stops being a candidate.
     fn assign_blocks(
         &self,
         sizes: &[u64],
@@ -126,7 +144,12 @@ impl UploadCoordinator {
         let mut rng = rand::rng();
         let mut blocks = Vec::with_capacity(sizes.len());
         for (idx, &size) in sizes.iter().enumerate() {
-            let (first, second) = placement::pick_pair(&candidates, &mut rng)?;
+            let eligible: Vec<WorkerInfo> = candidates
+                .iter()
+                .filter(|w| w.free_bytes() >= self.min_free())
+                .cloned()
+                .collect();
+            let (first, second) = placement::pick_pair(&eligible, &mut rng)?;
             for chosen in [&first, &second] {
                 if let Some(w) = candidates.iter_mut().find(|w| w.id == chosen.id) {
                     w.used_bytes += size;
@@ -151,8 +174,9 @@ impl UploadCoordinator {
         lease_id: Option<&str>,
         now_ms: u64,
     ) -> Result<UploadPlan, MasterError> {
-        // Fail fast, before touching the metadata, if there is nowhere to write.
-        let sizes = self.block_sizes(size);
+        // Fail fast, before touching the metadata, if the size is absurd or
+        // there is nowhere to write.
+        let sizes = self.block_sizes(size)?;
         let candidates = self.candidates(now_ms, &[]);
         if !sizes.is_empty() && candidates.len() < self.replication {
             return Err(MasterError::NoWorkers(format!(
@@ -197,10 +221,25 @@ impl UploadCoordinator {
             .await?;
 
         let version_no = db.latest_version_no(&inode.inode_id).await? + 1;
-        db.put_pending_version(fence, &inode.inode_id, version_no, size, now_ms)
+        db.put_pending_version(fence, &inode.inode_id, version_no, user_id, size, now_ms)
             .await?;
 
-        let blocks = self.assign_blocks(&sizes, candidates)?;
+        // If the cluster cannot take the whole file, undo the version so the
+        // path is not left with a dangling PENDING row and a held lease.
+        let blocks = match self.assign_blocks(&sizes, candidates) {
+            Ok(blocks) => blocks,
+            Err(e) => {
+                let undo = vec![
+                    retire_version_item(db, &inode.inode_id, version_no, now_ms)?,
+                    release_path_lease_item(db, &inode.inode_id, &lease_id)?,
+                ];
+                if let Err(undo_err) = db.fenced_write(fence, undo).await {
+                    tracing::warn!(error = %undo_err, "could not undo a failed StartUpload");
+                }
+                return Err(e);
+            }
+        };
+
         let vid = version_id(&inode.inode_id, version_no);
         let rows: Vec<BlockRecord> = blocks
             .iter()
@@ -223,11 +262,13 @@ impl UploadCoordinator {
         })
     }
 
-    /// Checks that the caller is the writer of this pending version. Renewing
-    /// the lease is the check: only the holder can.
+    /// Checks that the caller is the writer of this pending version: the
+    /// version must be theirs and PENDING, and renewing the lease must work
+    /// (only the holder can).
     async fn check_writer(
         &self,
         fence: &Fence,
+        user_id: &str,
         inode_id: &str,
         version_no: u64,
         lease_id: &str,
@@ -237,6 +278,7 @@ impl UploadCoordinator {
         let version = db
             .get_version(inode_id, version_no)
             .await?
+            .filter(|v| v.owner_id == user_id)
             .ok_or(MasterError::NotFound)?;
         if version.status != VersionStatus::Pending {
             return Err(MasterError::InvalidArgument(format!(
@@ -253,7 +295,7 @@ impl UploadCoordinator {
     pub async fn reassign(
         &self,
         fence: &Fence,
-        _user_id: &str,
+        user_id: &str,
         inode_id: &str,
         version_no: u64,
         lease_id: &str,
@@ -261,7 +303,7 @@ impl UploadCoordinator {
         exclude: &[String],
         now_ms: u64,
     ) -> Result<BlockAssignment, MasterError> {
-        self.check_writer(fence, inode_id, version_no, lease_id, now_ms)
+        self.check_writer(fence, user_id, inode_id, version_no, lease_id, now_ms)
             .await?;
         let db = self.ns.db();
         let vid = version_id(inode_id, version_no);
@@ -293,7 +335,7 @@ impl UploadCoordinator {
     }
 
     fn check_report(&self, size: u64, blocks: &[CommittedBlock]) -> Result<(), MasterError> {
-        let expected = self.block_sizes(size);
+        let expected = self.block_sizes(size)?;
         if blocks.len() != expected.len() {
             return Err(MasterError::InvalidArgument(format!(
                 "{} bytes need {} blocks, got {}",
@@ -318,6 +360,11 @@ impl UploadCoordinator {
             if block.sha256.len() != 32 {
                 return Err(MasterError::InvalidArgument(format!(
                     "block {i} needs a 32-byte sha256"
+                )));
+            }
+            if uuid::Uuid::parse_str(&block.block_id).is_err() {
+                return Err(MasterError::InvalidArgument(format!(
+                    "block {i} has an id that is not a UUID"
                 )));
             }
             if block.worker_ids.len() < self.replication {
@@ -352,8 +399,33 @@ impl UploadCoordinator {
             ));
         }
         self.check_report(size, &blocks)?;
+        let db = self.ns.db();
+
+        // A retry of a commit that already landed (the leader died right
+        // after the transaction and the gateway asked again) must succeed.
+        if let Some(done) = db
+            .get_version(inode_id, version_no)
+            .await?
+            .filter(|v| v.owner_id == user_id && v.status == VersionStatus::Committed)
+        {
+            if done.size == size && done.sha256 == sha256 {
+                return Ok(FileInfo {
+                    path: path.to_string(),
+                    inode_id: inode_id.to_string(),
+                    version_no,
+                    size,
+                    sha256: sha256.to_vec(),
+                    block_count: done.block_count as u32,
+                    modified_at: done.updated_at,
+                });
+            }
+            return Err(MasterError::InvalidArgument(format!(
+                "version {version_no} is already committed with different content"
+            )));
+        }
+
         let version = self
-            .check_writer(fence, inode_id, version_no, lease_id, now_ms)
+            .check_writer(fence, user_id, inode_id, version_no, lease_id, now_ms)
             .await?;
         if version.size != size {
             return Err(MasterError::InvalidArgument(format!(
@@ -365,12 +437,23 @@ impl UploadCoordinator {
         // The entry must still be the file we started with (not removed or
         // replaced by a directory while the upload ran).
         let (parent, name) = self.ns.resolve_parent(user_id, path).await?;
-        let db = self.ns.db();
         let inode = db
             .get_inode(&parent.inode_id, &name)
             .await?
             .filter(|i| i.inode_id == inode_id && i.kind == InodeType::File)
             .ok_or(MasterError::NotFound)?;
+
+        // Our lease expired and somebody else uploaded and committed a newer
+        // version meanwhile: we lost. The transaction below checks this again,
+        // atomically; this early exit just gives a clear answer and frees the
+        // lease we re-took in check_writer.
+        if inode.current_version >= version_no {
+            let _ = db.release_path_lease(fence, inode_id, lease_id).await;
+            return Err(MasterError::Conflict(format!(
+                "version {} was committed after this upload started",
+                inode.current_version
+            )));
+        }
 
         // Block rows get their hashes first; if we crash here the version is
         // still PENDING and nothing is visible.
@@ -408,7 +491,7 @@ impl UploadCoordinator {
                 now_ms,
             )?,
         ];
-        if inode.current_version > 0 && inode.current_version != version_no {
+        if inode.current_version > 0 {
             items.push(retire_version_item(
                 db,
                 inode_id,
@@ -423,7 +506,9 @@ impl UploadCoordinator {
             MasterError::ConditionFailed(0) => {
                 MasterError::InvalidArgument("version is no longer PENDING".into())
             }
-            MasterError::ConditionFailed(1) => MasterError::NotFound,
+            MasterError::ConditionFailed(1) => MasterError::Conflict(
+                "the file was removed, replaced or moved during the upload".into(),
+            ),
             MasterError::ConditionFailed(i) if i == lease_item => MasterError::Locked,
             other => {
                 on_condition_failed(other, MasterError::Db("commit transaction failed".into()))
@@ -460,7 +545,7 @@ impl UploadCoordinator {
         lease_id: &str,
         now_ms: u64,
     ) -> Result<(), MasterError> {
-        self.check_writer(fence, inode_id, version_no, lease_id, now_ms)
+        self.check_writer(fence, user_id, inode_id, version_no, lease_id, now_ms)
             .await?;
         let db = self.ns.db();
 

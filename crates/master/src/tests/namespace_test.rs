@@ -21,7 +21,7 @@ async fn put_file(t: &TestDb, parent_id: &str, name: &str, size: u64) -> Inode {
         modified_at: now_ms(),
     };
     t.db.put_inode(&t.fence, &inode).await.unwrap();
-    t.db.put_pending_version(&t.fence, &inode.inode_id, 1, size, now_ms())
+    t.db.put_pending_version(&t.fence, &inode.inode_id, 1, U1, size, now_ms())
         .await
         .unwrap();
     inode
@@ -201,6 +201,41 @@ async fn rmdir_refuses_a_non_empty_directory_unless_recursive() {
         Err(MasterError::NotFound)
     ));
     assert!(t.db.list_children(&docs.inode_id).await.unwrap().is_empty());
+
+    t.cleanup().await;
+}
+
+#[tokio::test]
+async fn rmdir_treats_a_directory_with_only_ghost_entries_as_empty() {
+    let Some(t) = test_db().await else { return };
+    let ns = Namespace::new(t.db.clone());
+    ns.mkdir(&t.fence, U1, "/docs", now_ms()).await.unwrap();
+    let docs = ns.resolve(U1, "/docs").await.unwrap();
+    // A file whose first upload never finished: invisible to ls.
+    let mut ghost = put_file(&t, &docs.inode_id, "half.bin", 10).await;
+    t.db.delete_inode(&t.fence, &docs.inode_id, "half.bin", &ghost.inode_id)
+        .await
+        .unwrap();
+    ghost.current_version = 0;
+    t.db.put_inode(&t.fence, &ghost).await.unwrap();
+    assert!(ns.list(U1, "/docs").await.unwrap().is_empty());
+
+    // What ls shows as empty, rmdir must accept as empty.
+    ns.remove(&t.fence, U1, "/docs", false, now_ms())
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        ns.resolve(U1, "/docs").await,
+        Err(MasterError::NotFound)
+    ));
+    assert!(
+        t.db.get_inode(&docs.inode_id, "half.bin")
+            .await
+            .unwrap()
+            .is_none(),
+        "no orphan rows"
+    );
 
     t.cleanup().await;
 }

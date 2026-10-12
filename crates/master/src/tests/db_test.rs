@@ -34,10 +34,16 @@ async fn create_tables_is_idempotent() {
 async fn two_masters_can_create_the_tables_at_the_same_time() {
     // Both control nodes boot together after terraform apply; whoever loses
     // the race must not crash on "table already exists".
-    let Ok(endpoint) = std::env::var("DFSHA_TEST_DYNAMO_ENDPOINT") else { return };
+    let Ok(endpoint) = std::env::var("DFSHA_TEST_DYNAMO_ENDPOINT") else {
+        return;
+    };
     let prefix = format!("race{}_", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-    let a = crate::db::Db::connect(Some(&endpoint), &prefix).await.unwrap();
-    let b = crate::db::Db::connect(Some(&endpoint), &prefix).await.unwrap();
+    let a = crate::db::Db::connect(Some(&endpoint), &prefix)
+        .await
+        .unwrap();
+    let b = crate::db::Db::connect(Some(&endpoint), &prefix)
+        .await
+        .unwrap();
 
     let (ra, rb) = tokio::join!(a.create_tables(), b.create_tables());
 
@@ -145,19 +151,6 @@ async fn children_are_listed_sorted_by_name() {
 }
 
 #[tokio::test]
-async fn has_children_tells_empty_from_non_empty() {
-    let Some(t) = test_db().await else { return };
-
-    assert!(!t.db.has_children("root:u1").await.unwrap());
-    t.db.put_inode(&t.fence, &dir("root:u1", "docs", "u1"))
-        .await
-        .unwrap();
-    assert!(t.db.has_children("root:u1").await.unwrap());
-
-    t.cleanup().await;
-}
-
-#[tokio::test]
 async fn delete_checks_the_inode_id() {
     let Some(t) = test_db().await else { return };
     let docs = dir("root:u1", "docs", "u1");
@@ -220,13 +213,13 @@ async fn versions_are_numbered_per_inode() {
     let Some(t) = test_db().await else { return };
 
     assert_eq!(t.db.latest_version_no("f1").await.unwrap(), 0);
-    t.db.put_pending_version(&t.fence, "f1", 1, 100, now_ms())
+    t.db.put_pending_version(&t.fence, "f1", 1, "u1", 100, now_ms())
         .await
         .unwrap();
-    t.db.put_pending_version(&t.fence, "f1", 2, 100, now_ms())
+    t.db.put_pending_version(&t.fence, "f1", 2, "u1", 100, now_ms())
         .await
         .unwrap();
-    t.db.put_pending_version(&t.fence, "f2", 1, 100, now_ms())
+    t.db.put_pending_version(&t.fence, "f2", 1, "u1", 100, now_ms())
         .await
         .unwrap();
 
@@ -236,6 +229,7 @@ async fn versions_are_numbered_per_inode() {
     let v = t.db.get_version("f1", 2).await.unwrap().unwrap();
     assert_eq!(v.status, VersionStatus::Pending);
     assert_eq!(v.size, 100);
+    assert_eq!(v.owner_id, "u1");
 
     t.cleanup().await;
 }
@@ -340,6 +334,57 @@ async fn releasing_a_path_lease_frees_it() {
         .unwrap();
 
     t.cleanup().await;
+}
+
+#[tokio::test]
+async fn releasing_a_lease_twice_is_fine() {
+    let Some(t) = test_db().await else { return };
+    t.db.acquire_path_lease(&t.fence, "f1", "lease-a", now_ms(), 60_000)
+        .await
+        .unwrap();
+
+    t.db.release_path_lease(&t.fence, "f1", "lease-a")
+        .await
+        .unwrap();
+    // A gateway retrying after a lost reply must not get an error.
+    t.db.release_path_lease(&t.fence, "f1", "lease-a")
+        .await
+        .unwrap();
+
+    t.cleanup().await;
+}
+
+#[test]
+fn transaction_cancellations_are_classified_by_what_failed() {
+    use crate::db::{Cancellation, classify_cancellation};
+
+    // Item 0 is always the fence check.
+    assert_eq!(
+        classify_cancellation(&[Some("ConditionalCheckFailed"), Some("None")]),
+        Cancellation::Fenced
+    );
+    assert_eq!(
+        classify_cancellation(&[Some("None"), Some("None"), Some("ConditionalCheckFailed")]),
+        Cancellation::ConditionFailed(1)
+    );
+    // Only conflicts with other transactions: worth retrying.
+    assert_eq!(
+        classify_cancellation(&[Some("TransactionConflict"), Some("None")]),
+        Cancellation::Conflict
+    );
+    assert_eq!(
+        classify_cancellation(&[Some("None"), Some("TransactionConflict")]),
+        Cancellation::Conflict
+    );
+    // A real condition failure wins over a conflict elsewhere.
+    assert_eq!(
+        classify_cancellation(&[Some("TransactionConflict"), Some("ConditionalCheckFailed")]),
+        Cancellation::ConditionFailed(0)
+    );
+    assert_eq!(
+        classify_cancellation(&[Some("None"), Some("ValidationError")]),
+        Cancellation::Other
+    );
 }
 
 // ----- leader lease and fencing --------------------------------------------

@@ -35,6 +35,11 @@ struct State {
     fence: Option<Fence>,
     /// When we last became leader (ms), for safe mode.
     since_ms: u64,
+    /// Until when the last successful acquire/renew guarantees the lease.
+    /// If DynamoDB is unreachable we cannot renew, and past this point the
+    /// standby may already lead: stop acting instead of trusting a lease we
+    /// cannot see.
+    valid_until_ms: u64,
 }
 
 pub struct Leadership {
@@ -55,6 +60,7 @@ impl Leadership {
             state: RwLock::new(State {
                 fence: None,
                 since_ms: 0,
+                valid_until_ms: 0,
             }),
         }
     }
@@ -64,12 +70,25 @@ impl Leadership {
     }
 
     pub fn is_leader(&self) -> bool {
-        self.state.read().unwrap().fence.is_some()
+        self.is_leader_at(crate::time::now_ms())
     }
 
-    /// The fence to attach to writes, or None when we are standby.
+    pub fn is_leader_at(&self, now_ms: u64) -> bool {
+        self.fence_at(now_ms).is_some()
+    }
+
+    /// The fence to attach to writes, or None when we are standby or our
+    /// last renewal is too old to trust.
     pub fn fence(&self) -> Option<Fence> {
-        self.state.read().unwrap().fence.clone()
+        self.fence_at(crate::time::now_ms())
+    }
+
+    pub fn fence_at(&self, now_ms: u64) -> Option<Fence> {
+        let state = self.state.read().unwrap();
+        if now_ms > state.valid_until_ms {
+            return None;
+        }
+        state.fence.clone()
     }
 
     /// Like fence() but as the error every RPC returns on a standby.
@@ -82,15 +101,19 @@ impl Leadership {
     }
 
     pub fn safe_mode(&self, now_ms: u64) -> bool {
-        let state = self.state.read().unwrap();
-        state.fence.is_some() && now_ms.saturating_sub(state.since_ms) < SAFE_MODE_MS
+        self.is_leader_at(now_ms)
+            && now_ms.saturating_sub(self.state.read().unwrap().since_ms) < SAFE_MODE_MS
     }
 
     /// One step of the loop: renew if we lead, otherwise try to take over.
     pub async fn tick(&self, now_ms: u64, ttl_ms: u64) -> Result<Transition, MasterError> {
-        match self.fence() {
+        // The raw fence, not fence_at(): even if our window ran out we may
+        // still be the holder in DynamoDB, and renewing is how we find out.
+        let held = self.state.read().unwrap().fence.clone();
+        match held {
             Some(fence) => {
                 if self.db.renew_leader(&fence, now_ms, ttl_ms).await? {
+                    self.state.write().unwrap().valid_until_ms = now_ms + ttl_ms;
                     Ok(Transition::StillLeader)
                 } else {
                     self.state.write().unwrap().fence = None;
@@ -113,6 +136,7 @@ impl Leadership {
                         fencing: lease.fencing,
                     });
                     state.since_ms = now_ms;
+                    state.valid_until_ms = now_ms + ttl_ms;
                     tracing::info!(master = %self.me, fencing = lease.fencing, "became leader");
                     Ok(Transition::BecameLeader)
                 }

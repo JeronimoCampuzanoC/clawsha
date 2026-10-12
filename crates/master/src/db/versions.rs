@@ -40,6 +40,10 @@ impl VersionStatus {
 pub struct Version {
     pub inode_id: String,
     pub version_no: u64,
+    /// Who started the upload. Checked on every later step of it, so a
+    /// caller cannot commit, abort or reassign somebody else's version just
+    /// by knowing its inode_id.
+    pub owner_id: String,
     pub status: VersionStatus,
     pub size: u64,
     /// SHA-256 of the whole file; empty while PENDING.
@@ -97,6 +101,7 @@ impl Db {
         fence: &Fence,
         inode_id: &str,
         version_no: u64,
+        owner_id: &str,
         size: u64,
         now_ms: u64,
     ) -> Result<(), MasterError> {
@@ -104,6 +109,7 @@ impl Db {
             .table_name(self.tables.versions())
             .item("inode_id", s(inode_id))
             .item("version_no", n(version_no))
+            .item("owner_id", s(owner_id))
             .item("status", s(VersionStatus::Pending.as_str()))
             .item("size", n(size))
             .item("block_count", n(0))
@@ -201,6 +207,7 @@ fn version_from_item(item: &Item) -> Result<Version, MasterError> {
     Ok(Version {
         inode_id: get_s(item, "inode_id")?,
         version_no: get_n(item, "version_no")?,
+        owner_id: get_s(item, "owner_id")?,
         status: VersionStatus::parse(&get_s(item, "status")?)?,
         size: get_n_or(item, "size", 0)?,
         sha256: if item.contains_key("sha256") {

@@ -273,7 +273,7 @@ message BlockLocation {
   string block_id = 2;
   uint64 size = 3;
   bytes sha256 = 4;
-  repeated WorkerAddr replicas = 5;   // only workers believed alive
+  repeated WorkerAddr replicas = 5;   // workers not known to be dead (ALIVE or SUSPECT)
 }
 
 message ReadPlan {

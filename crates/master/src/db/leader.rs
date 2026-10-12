@@ -30,6 +30,11 @@ pub struct LeaderLease {
 impl Db {
     /// Tries to become leader. Succeeds only if nobody holds the lease or the
     /// current one expired. Returns the new lease (with fencing + 1) or None.
+    ///
+    /// `expires_at` was written with the holder's clock and compared here
+    /// with ours, so the two masters' clocks must agree to well under the
+    /// 10 s lease. EC2 instances sync with the Amazon Time Sync Service, so
+    /// the skew is milliseconds.
     pub async fn try_acquire_leader(
         &self,
         me: &str,

@@ -485,7 +485,264 @@ async fn commit_rejects_bad_reports() {
 }
 
 #[tokio::test]
-async fn commit_twice_fails_the_second_time() {
+async fn absurd_sizes_are_rejected_before_any_work() {
+    let Some(r) = rig().await else { return };
+    let too_big = (crate::upload::MAX_BLOCKS_PER_FILE as u64 + 1) * BLOCK;
+
+    let e = r
+        .uploads
+        .start(&r.t.fence, U1, "/huge", too_big, None, now_ms())
+        .await;
+    assert!(
+        matches!(e, Err(MasterError::InvalidArgument(_))),
+        "got {e:?}"
+    );
+    assert!(
+        r.t.db
+            .get_inode("root:user-1", "huge")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    r.t.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_stale_writer_cannot_overwrite_a_newer_version() {
+    let Some(r) = rig().await else { return };
+    let t0 = now_ms();
+    let v1 = vec![1u8; 100];
+    let slow = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 100, None, t0)
+        .await
+        .unwrap();
+
+    // The slow writer's lease expires; a second writer uploads and commits.
+    // (The fake workers heartbeat again so they are still alive at t1.)
+    let t1 = t0 + 70_000;
+    for (id, az) in [("a1", "a"), ("a2", "a"), ("b1", "b"), ("b2", "b")] {
+        r.cluster.heartbeat(hb(id, az), t1);
+    }
+    let v2 = vec![2u8; 50];
+    let fast = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 50, None, t1)
+        .await
+        .unwrap();
+    assert_eq!(fast.version_no, 2);
+    r.uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &fast.inode_id,
+            2,
+            &fast.lease_id,
+            50,
+            &sha(&v2),
+            acks(&fast, &v2),
+            t1,
+        )
+        .await
+        .unwrap();
+
+    // The slow writer wakes up and tries to commit version 1.
+    let late = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &slow.inode_id,
+            1,
+            &slow.lease_id,
+            100,
+            &sha(&v1),
+            acks(&slow, &v1),
+            t1 + 1_000,
+        )
+        .await;
+    assert!(
+        matches!(late, Err(MasterError::Conflict(_))),
+        "got {late:?}"
+    );
+
+    let stat = r.ns.resolve(U1, "/a.bin").await.unwrap();
+    assert_eq!(stat.current_version, 2, "the newer version stays");
+    assert_eq!(stat.size, 50);
+    let v2_row =
+        r.t.db
+            .get_version(&fast.inode_id, 2)
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(v2_row.status, VersionStatus::Committed);
+
+    r.t.cleanup().await;
+}
+
+#[tokio::test]
+async fn another_user_cannot_touch_someone_elses_upload() {
+    let Some(r) = rig().await else { return };
+    let now = now_ms();
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 1_500, None, now)
+        .await
+        .unwrap();
+    let intruder = "user-2";
+
+    let e = r
+        .uploads
+        .abort(
+            &r.t.fence,
+            intruder,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            now,
+        )
+        .await;
+    assert!(matches!(e, Err(MasterError::NotFound)), "abort: {e:?}");
+
+    let e = r
+        .uploads
+        .reassign(
+            &r.t.fence,
+            intruder,
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            0,
+            &[],
+            now,
+        )
+        .await;
+    assert!(matches!(e, Err(MasterError::NotFound)), "reassign: {e:?}");
+
+    let content = vec![7u8; 1_500];
+    let e = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            intruder,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            1_500,
+            &sha(&content),
+            acks(&plan, &content),
+            now,
+        )
+        .await;
+    assert!(matches!(e, Err(MasterError::NotFound)), "commit: {e:?}");
+
+    // The real owner is unaffected.
+    let v =
+        r.t.db
+            .get_version(&plan.inode_id, 1)
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(v.status, VersionStatus::Pending);
+    r.uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            1_500,
+            &sha(&content),
+            acks(&plan, &content),
+            now,
+        )
+        .await
+        .unwrap();
+
+    r.t.cleanup().await;
+}
+
+#[tokio::test]
+async fn plan_never_fills_a_worker_past_its_quota() {
+    let Some(t) = test_db().await else { return };
+    let cluster = Arc::new(ClusterState::new());
+    let now = now_ms();
+    // Each worker has room for exactly two more blocks (needs 2 blocks free to
+    // be a candidate): 4 workers x 2 = 8 block copies, i.e. a 4-block file.
+    for (id, az) in [("a1", "a"), ("a2", "a"), ("b1", "b"), ("b2", "b")] {
+        let mut h = hb(id, az);
+        h.quota_bytes = 3 * BLOCK;
+        cluster.heartbeat(h, now);
+    }
+    let uploads = UploadCoordinator::new(Namespace::new(t.db.clone()), cluster, BLOCK, 2);
+
+    let plan = uploads
+        .start(&t.fence, U1, "/fits", 4 * BLOCK, None, now)
+        .await
+        .unwrap();
+    let mut per_worker = std::collections::HashMap::new();
+    for b in &plan.blocks {
+        for w in &b.workers {
+            *per_worker.entry(w.id.clone()).or_insert(0u64) += b.size;
+        }
+    }
+    assert!(
+        per_worker.values().all(|&bytes| bytes <= 2 * BLOCK),
+        "{per_worker:?}"
+    );
+
+    let e = uploads
+        .start(&t.fence, U1, "/too-much", 5 * BLOCK, None, now)
+        .await;
+    assert!(matches!(e, Err(MasterError::NoWorkers(_))), "got {e:?}");
+
+    t.cleanup().await;
+}
+
+#[tokio::test]
+async fn commit_rejects_block_ids_that_are_not_uuids() {
+    let Some(r) = rig().await else { return };
+    let now = now_ms();
+    let content = vec![7u8; 100];
+    let plan = r
+        .uploads
+        .start(&r.t.fence, U1, "/a.bin", 100, None, now)
+        .await
+        .unwrap();
+    let mut bad = acks(&plan, &content);
+    bad[0].block_id = "ñ".to_string();
+
+    let e = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            100,
+            &sha(&content),
+            bad,
+            now,
+        )
+        .await;
+    assert!(
+        matches!(e, Err(MasterError::InvalidArgument(_))),
+        "got {e:?}"
+    );
+
+    r.t.cleanup().await;
+}
+
+#[tokio::test]
+async fn commit_is_idempotent_for_the_same_content() {
     let Some(r) = rig().await else { return };
     let now = now_ms();
     let content = vec![7u8; 100];
@@ -524,10 +781,33 @@ async fn commit_twice_fails_the_second_time() {
             acks(&plan, &content),
             now,
         )
+        .await
+        .unwrap();
+    // A retry after a lost reply must succeed, not fail with 400.
+    assert_eq!(again.version_no, 1);
+    assert_eq!(again.size, 100);
+    assert_eq!(again.block_count, 1);
+
+    // But not for different content under the same version.
+    let other = vec![8u8; 100];
+    let e = r
+        .uploads
+        .commit(
+            &r.t.fence,
+            U1,
+            "/a.bin",
+            &plan.inode_id,
+            1,
+            &plan.lease_id,
+            100,
+            &sha(&other),
+            acks(&plan, &other),
+            now,
+        )
         .await;
     assert!(
-        matches!(again, Err(MasterError::InvalidArgument(_))),
-        "got {again:?}"
+        matches!(e, Err(MasterError::InvalidArgument(_))),
+        "got {e:?}"
     );
 
     r.t.cleanup().await;

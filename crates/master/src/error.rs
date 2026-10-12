@@ -23,6 +23,9 @@ pub enum MasterError {
     #[error("path is locked by another writer")]
     Locked,
 
+    #[error("the file changed while the upload ran: {0}")]
+    Conflict(String),
+
     #[error("wrong username or password")]
     Unauthenticated,
 
@@ -56,7 +59,7 @@ impl From<MasterError> for Status {
             InvalidPath(_) | InvalidArgument(_) => Status::invalid_argument(msg),
             NotFound => Status::not_found(msg),
             AlreadyExists => Status::already_exists(msg),
-            DirNotEmpty | Locked => Status::failed_precondition(msg),
+            DirNotEmpty | Locked | Conflict(_) => Status::failed_precondition(msg),
             Unauthenticated => Status::unauthenticated(msg),
             NotLeader | Fenced | NoWorkers(_) | NoReplica(_) => Status::unavailable(msg),
             Db(_) | ConditionFailed(_) => Status::internal(msg),

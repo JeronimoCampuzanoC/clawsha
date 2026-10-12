@@ -66,19 +66,25 @@ Las únicas escrituras que no pasan por ahí son las dos del lease mismo
 
 ## Flujo de subida
 
-1. `StartUpload(path, size)`: toma el lease de la ruta (60 s; si otro lo
-   tiene, 409), crea la versión `PENDING` con número `último + 1`, calcula
-   `ceil(size / 16 MiB)` bloques, les asigna UUID y un par de workers (uno por
-   AZ), y escribe las filas de `blocks` sin hash. Si el archivo es nuevo, crea
-   el inodo con `current_version = 0`: existe para el que escribe pero sigue
-   invisible para `ls` y `stat`.
+1. `StartUpload(path, size)`: rechaza tamaños absurdos (más de 65 536
+   bloques) y falla rápido si no hay 2 workers con espacio. Si el archivo es
+   nuevo, crea el inodo con `current_version = 0`: existe para el que escribe
+   pero sigue invisible para `ls` y `stat`. Toma el lease de la ruta (60 s; si
+   otro lo tiene, 409), crea la versión `PENDING` con número `último + 1` y el
+   `owner_id` del que sube, calcula `ceil(size / 16 MiB)` bloques, les asigna
+   UUID y un par de workers (uno por AZ) y escribe las filas de `blocks` sin
+   hash.
 2. El gateway escribe los bloques en los workers. Si un par falla, pide
    `ReassignBlock`: nuevo UUID, nuevo par, misma posición.
 3. `CommitUpload`: valida el reporte (tantos bloques como toca, en orden,
-   tamaños que suman, hash de 32 bytes y **al menos R = 2 copias por bloque**),
-   reescribe `blocks` con los hashes y hace **una transacción**: versión a
-   `COMMITTED`, inodo apunta a ella, versión anterior a `OLD`, lease liberado.
-   Después registra en memoria las ubicaciones que confirmaron los acks.
+   tamaños que suman, hash de 32 bytes, ids UUID y **al menos R = 2 copias por
+   bloque**), comprueba que la versión sea del mismo usuario, reescribe
+   `blocks` con los hashes y hace **una transacción**: versión a `COMMITTED`,
+   inodo apunta a ella (solo si `current_version < version_no`, para que un
+   escritor cuyo lease venció no tape una versión más nueva), versión anterior
+   a `OLD`, lease liberado. Después registra en memoria las ubicaciones que
+   confirmaron los acks. Es idempotente: repetir un commit que ya quedó (el
+   líder murió justo después de la transacción) devuelve el mismo resultado.
 4. `AbortUpload`: versión a `OLD` (el GC borra sus bloques) y lease liberado.
    Si el archivo nunca tuvo una versión confirmada, se borra también el inodo
    fantasma.
@@ -114,7 +120,9 @@ reparación la da el módulo de salud (B).
 
 ## Failover del líder
 
-- El líder renueva el lease cada 3 s; el lease dura 10 s.
+- El líder renueva el lease cada 3 s; el lease dura 10 s. Si no logra renovar
+  durante un lease completo (DynamoDB inalcanzable), deja de actuar y de
+  responder 200 aunque nadie le haya quitado el lease todavía.
 - El standby intenta tomarlo cada 3 s con una escritura condicional
   (`attribute_not_exists(holder) OR expires_at < now`). Al ganar, `fencing + 1`
   y borra su mapa de workers: los workers ven el fencing nuevo en la respuesta
@@ -130,13 +138,22 @@ reparación la da el módulo de salud (B).
 Prueba local: `scripts/dev/failover-local.sh` levanta dos masters contra
 DynamoDB Local, mata al líder y mide cuánto tarda el otro en responder 200.
 
+## Contención en la fila `leader`
+
+Toda escritura lleva un `ConditionCheck` sobre la misma fila, y DynamoDB
+cancela con `TransactionConflict` cuando dos transacciones tocan un ítem a la
+vez (también la renovación del lease cada 3 s). Como una transacción cancelada
+no escribe nada, `fenced_write` reintenta hasta 3 veces con una espera
+aleatoria corta. Es el costo de tener un solo árbitro; para este tamaño de
+clúster es despreciable, pero es la pregunta natural en la sustentación.
+
 ## Códigos de error
 
 | gRPC | HTTP (gateway) | Cuándo |
 | --- | --- | --- |
 | `NOT_FOUND` | 404 | la ruta no existe o es de otro usuario |
 | `ALREADY_EXISTS` | 409 | `mkdir` sobre un nombre ocupado; username repetido |
-| `FAILED_PRECONDITION` | 409 | carpeta no vacía; ruta con lease de otro escritor |
+| `FAILED_PRECONDITION` | 409 | carpeta no vacía; ruta con lease de otro escritor; el archivo cambió durante la subida |
 | `INVALID_ARGUMENT` | 400 | ruta relativa o con `..`; contraseña corta; reporte de commit inconsistente |
 | `UNAUTHENTICATED` | 401 | usuario o contraseña incorrectos |
 | `UNAVAILABLE` | 503 | no soy el líder; no hay 2 workers para escribir; un bloque sin réplica viva |
@@ -156,6 +173,11 @@ Variables de entorno en `crates/master/.env.example`.
 
 - Modo seguro: hoy es solo un flag por tiempo (30 s); falta que el líder espere
   a que reporten todos los workers que conocía.
+- El índice `by_status` concentra todas las versiones `COMMITTED` en una sola
+  clave de partición; para el tamaño del proyecto da igual, a escala habría
+  que repartirla.
+- Dos `StartUpload` simultáneos sobre una ruta nueva: el segundo recibe
+  `ALREADY_EXISTS` (409) en vez de "ruta con lease"; mismo código HTTP.
 - Caché LRU `ruta → inodo` (hoy cada resolución es un GetItem por nivel).
 - Marcar un bloque para moverse cuando las dos réplicas quedaron en la misma AZ.
 - Un `lock()` que nunca se usa deja un inodo oculto con el nombre reservado.
