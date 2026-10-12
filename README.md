@@ -46,6 +46,9 @@ curl localhost:8080/health/leader              # 200 = este master es el líder
 scripts/dev/failover-local.sh
 ```
 
+Guía completa (local hoy, clúster completo y despliegue en AWS):
+[docs/running.md](docs/running.md).
+
 Las pruebas del master que usan la base necesitan `DFSHA_TEST_DYNAMO_ENDPOINT`;
 sin la variable fallan con instrucciones. Para correr solo las pruebas puras
 (sin Java ni Docker): `DFSHA_SKIP_DB_TESTS=1 cargo test`.
