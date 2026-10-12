@@ -1,0 +1,10 @@
+mod auth_test;
+mod cluster_test;
+mod db_test;
+mod grpc_test;
+mod leader_test;
+mod namespace_test;
+mod path_test;
+mod placement_test;
+mod support;
+mod upload_test;
