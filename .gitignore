@@ -34,3 +34,7 @@ bench/results/
 
 # DynamoDB Local downloaded by scripts/dev/dynamodb-local.sh
 .dynamodb-local/
+
+# Cliente de prueba local del worker (no es parte del sistema)
+/crates/testclient/
+testclient-manifest.txt

@@ -6,3 +6,12 @@ target/
 .dynamodb-local/
 infra/**/.terraform/
 *.tfstate*
+
+# Local state and secrets that must not end up in an image.
+.env
+**/.env
+dev-data/
+data/
+testclient-manifest.txt
+
+crates/testclient/

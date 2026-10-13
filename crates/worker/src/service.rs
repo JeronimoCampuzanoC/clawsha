@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Code, Request, Response, Status, Streaming};
+use tracing::{info, warn};
 
 use crate::fencing::Fencing;
 use crate::pb::worker_service_server::WorkerService;
@@ -54,7 +55,10 @@ impl WorkerService for WorkerSvc {
         request: Request<Streaming<BlockFrame>>,
     ) -> Result<Response<PutBlockResponse>, Status> {
         let storage = Arc::clone(&self.storage);
-        let response = receive_block(storage, request.into_inner()).await?;
+        let response = receive_block(storage, request.into_inner())
+            .await
+            .inspect_err(|status| log_failure("PutBlock", "", status))?;
+        info!(block_id = %response.block_id, bytes = response.stored_bytes, "PutBlock stored");
         Ok(Response::new(response))
     }
 
@@ -63,15 +67,22 @@ impl WorkerService for WorkerSvc {
         request: Request<GetBlockRequest>,
     ) -> Result<Response<Self::GetBlockStream>, Status> {
         let GetBlockRequest { block_id, offset } = request.into_inner();
+        info!(%block_id, offset, "GetBlock requested");
 
         // Open the block: checks the id, that it exists and that the offset fits.
         let storage = Arc::clone(&self.storage);
         let id = block_id.clone();
-        let file = blocking(move || storage.open_block(&id, offset)).await?;
+        let file = blocking(move || storage.open_block(&id, offset))
+            .await
+            .inspect_err(|status| log_failure("GetBlock", &block_id, status))?;
 
         //  Verify the block against its stored hash.
         let storage = Arc::clone(&self.storage);
-        blocking(move || storage.verify_block(&block_id)).await?;
+        let id = block_id.clone();
+        blocking(move || storage.verify_block(&id))
+            .await
+            .inspect_err(|status| log_failure("GetBlock", &block_id, status))?;
+        info!(%block_id, "GetBlock streaming");
 
         //  Read the file on a blocking thread and feed the channel.
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
@@ -89,15 +100,22 @@ impl WorkerService for WorkerSvc {
         let DeleteBlockRequest { block_id, fencing } = request.into_inner();
 
         // 1. Only the current leader may give orders.
-        self.fencing.check(fencing)?;
+        self.fencing
+            .check(fencing)
+            .inspect_err(|status| log_failure("DeleteBlock", &block_id, status))?;
 
         // 2. Delete on the blocking pool. A block that is already gone is fine.
         let storage = Arc::clone(&self.storage);
-        let freed_bytes = match blocking(move || storage.delete_block(&block_id)).await {
+        let id = block_id.clone();
+        let freed_bytes = match blocking(move || storage.delete_block(&id)).await {
             Ok(bytes) => bytes,
             Err(status) if status.code() == Code::NotFound => 0,
-            Err(status) => return Err(status),
+            Err(status) => {
+                log_failure("DeleteBlock", &block_id, &status);
+                return Err(status);
+            }
         };
+        info!(%block_id, freed_bytes, "DeleteBlock done");
 
         Ok(Response::new(DeleteBlockResponse { freed_bytes }))
     }
@@ -113,8 +131,12 @@ impl WorkerService for WorkerSvc {
             overwrite,
         } = request.into_inner();
 
+        info!(%block_id, %target, overwrite, "ReplicateBlock requested");
+
         // 1. Only the current leader may give orders.
-        self.fencing.check(fencing)?;
+        self.fencing
+            .check(fencing)
+            .inspect_err(|status| log_failure("ReplicateBlock", &block_id, status))?;
         if target.is_empty() {
             return Err(Status::invalid_argument("target must not be empty"));
         }
@@ -122,11 +144,15 @@ impl WorkerService for WorkerSvc {
         // 2. Check the local copy and open it.
         let storage = Arc::clone(&self.storage);
         let id = block_id.clone();
-        let source = blocking(move || prepare_replica(&storage, &id)).await?;
+        let source = blocking(move || prepare_replica(&storage, &id))
+            .await
+            .inspect_err(|status| log_failure("ReplicateBlock", &block_id, status))?;
         let size = source.size;
 
         // 3. Connect to the target worker.
-        let mut client = connect_to(&target).await?;
+        let mut client = connect_to(&target)
+            .await
+            .inspect_err(|status| log_failure("ReplicateBlock", &block_id, status))?;
 
         // 4. Build the outgoing stream: header first, then data frames from a blocking thread.
         let (tx, rx) = mpsc::channel::<BlockFrame>(CHANNEL_CAPACITY);
@@ -143,8 +169,15 @@ impl WorkerService for WorkerSvc {
         client
             .put_block(ReceiverStream::new(rx))
             .await
-            .map_err(|status| target_error(&target, status))?;
+            .map_err(|status| target_error(&target, status))
+            .inspect_err(|status| log_failure("ReplicateBlock", &block_id, status))?;
+        info!(%block_id, %target, sent_bytes = size, "ReplicateBlock done");
 
         Ok(Response::new(ReplicateBlockResponse { sent_bytes: size }))
     }
+}
+
+/// One warn line per rejected request, with the gRPC code the caller will see.
+fn log_failure(rpc: &str, block_id: &str, status: &Status) {
+    warn!(rpc, block_id, code = ?status.code(), message = status.message(), "request failed");
 }
