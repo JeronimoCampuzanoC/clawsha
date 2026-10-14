@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/master","crates/worker"]
+members = ["crates/master", "crates/worker", "crates/gateway"]
 # Local smoke-test client, not committed. Keeping it out of `members` means a
 # clone (or the Docker build) works without the folder.
 exclude = ["crates/testclient"]
