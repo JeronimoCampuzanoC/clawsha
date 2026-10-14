@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (ignored by git) and fill in.
+master_image = "ghcr.io/<org>/dfsha-master:latest"
+worker_image = "ghcr.io/<org>/dfsha-worker:latest"
+
+# Leave empty until the gateway image exists: no gateways, no public NLB.
+gateway_image = ""
+
+# Uncomment to use one NAT instead of two while developing.
+# single_nat_gateway = true

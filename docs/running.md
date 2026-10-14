@@ -13,7 +13,7 @@ probados; los de la nube describen lo que falta construir en `infra/`.
 | `crates/master` | Completo para P0: metadata, namespace, subida/commit, planes de lectura, lease de líder, `/health/leader`. Ver `docs/master.md` | A |
 | `crates/worker` | Solo el almacenamiento en disco (escritura segura, hash, cuota). El binario abre `/data` y termina: todavía no sirve gRPC ni manda heartbeats | B |
 | `crates/gateway`, `frontend/` | Vacíos | C |
-| `infra/` (Terraform), `deploy/user-data` | Vacíos | B |
+| `infra/` (Terraform), `infra/scripts` (user-data) | Escrito, sin aplicar en AWS | B |
 | `deploy/compose.local.yml` | DynamoDB Local + 2 masters; faltan workers y gateway | A (base) |
 
 Conclusión: hoy se puede levantar la base de datos y los dos masters, hablarles
@@ -227,7 +227,7 @@ Lo que crea, en `us-east-1`:
 
 Point-in-time recovery activado. El prefijo `dfsha_` es `MASTER_TABLE_PREFIX`.
 
-**Cómo arranca cada nodo** (`deploy/user-data/*.sh`, por escribir)
+**Cómo arranca cada nodo** (`infra/scripts/*.sh.tftpl`)
 
 Nodo de control (`control.sh`): instala Docker, lee los secretos con el
 `LabInstanceProfile`, averigua su AZ e IP privada por IMDSv2 y corre dos

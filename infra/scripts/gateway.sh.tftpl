@@ -1,0 +1,22 @@
+#!/bin/bash
+# Gateway node. Rendered by Terraform (templatefile): $${...} are Terraform
+# values, plain $VARS are shell variables.
+set -euxo pipefail
+
+dnf install -y docker
+systemctl enable --now docker
+
+# TODO(C): the gateway's config does not exist yet. The variable names and
+# the container port below are placeholders; match them to its config.rs.
+# Wait until the image exists: the instance can boot before CI (or a
+# manual push) has published it, and Docker Hub can fail for a moment.
+until docker pull "${image}"; do
+  echo "image ${image} not available yet, retrying in 30 s" >&2
+  sleep 30
+done
+
+docker run -d --name gateway --restart always \
+  -p 443:443 \
+  -e MASTER_ADDR="http://${master_addr}:50051" \
+  -e RUST_LOG=info \
+  "${image}"

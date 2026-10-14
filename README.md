@@ -19,7 +19,7 @@ dfsha/
 │   └── docker/         # Dockerfiles multi-stage y compose local
 ├── infra/
 │   ├── modules/        # network, security, data, control, workers, edge
-│   └── user-data/      # arranque de las instancias
+│   └── scripts/        # arranque de las instancias (user-data)
 ├── scripts/chaos/      # pruebas de falla
 ├── bench/              # benchmarks
 ├── docs/               # informe y diagramas

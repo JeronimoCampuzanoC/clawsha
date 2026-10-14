@@ -1,0 +1,38 @@
+#!/bin/bash
+# Master node. Rendered by Terraform (templatefile): $${...} are Terraform
+# values, plain $VARS are shell variables.
+set -euxo pipefail
+
+dnf install -y docker
+systemctl enable --now docker
+
+# Instance metadata through IMDSv2.
+TOKEN=$(curl -sf -X PUT http://169.254.169.254/latest/api/token \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+meta() {
+  curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"
+}
+INSTANCE_ID=$(meta instance-id)
+AZ=$(meta placement/availability-zone)
+PRIVATE_IP=$(meta local-ipv4)
+
+# No MASTER_DYNAMODB_ENDPOINT: the SDK talks to the real DynamoDB with the
+# instance profile's credentials. The tables already exist (Terraform).
+# Wait until the image exists: the instance can boot before CI (or a
+# manual push) has published it, and Docker Hub can fail for a moment.
+until docker pull "${image}"; do
+  echo "image ${image} not available yet, retrying in 30 s" >&2
+  sleep 30
+done
+
+docker run -d --name master --restart always \
+  -p 50051:50051 -p 8080:8080 \
+  -e MASTER_ID="$INSTANCE_ID" \
+  -e MASTER_AZ="$AZ" \
+  -e MASTER_ADVERTISE_ADDR="$PRIVATE_IP:50051" \
+  -e MASTER_TABLE_PREFIX="${table_prefix}" \
+  -e MASTER_CREATE_TABLES=false \
+  -e MASTER_REPLICATION=2 \
+  -e AWS_REGION="${region}" \
+  -e RUST_LOG=info \
+  "${image}"

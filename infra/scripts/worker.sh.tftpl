@@ -1,0 +1,56 @@
+#!/bin/bash
+# Worker node. Rendered by Terraform (templatefile): $${...} are Terraform
+# values, plain $VARS are shell variables.
+set -euxo pipefail
+
+dnf install -y docker
+systemctl enable --now docker
+
+# Instance metadata through IMDSv2.
+TOKEN=$(curl -sf -X PUT http://169.254.169.254/latest/api/token \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+meta() {
+  curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"
+}
+INSTANCE_ID=$(meta instance-id)
+AZ=$(meta placement/availability-zone)
+PRIVATE_IP=$(meta local-ipv4)
+
+# Data volume: the disk that is not the root disk. On Nitro instances the
+# NVMe names do not follow the attach order, so we cannot assume nvme1n1.
+ROOT_DISK=/dev/$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")
+DEVICE=""
+for _ in $(seq 1 60); do
+  DEVICE=$(lsblk -dpno NAME,TYPE | awk '$2 == "disk" {print $1}' | grep -vx "$ROOT_DISK" | head -n1 || true)
+  [ -n "$DEVICE" ] && break
+  sleep 1
+done
+[ -n "$DEVICE" ] || { echo "data volume not found" >&2; exit 1; }
+
+# Format only the first time; after a reboot the blocks are still there.
+blkid "$DEVICE" || mkfs.xfs "$DEVICE"
+UUID=$(blkid -s UUID -o value "$DEVICE")
+mkdir -p /data
+grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /data xfs defaults,nofail 0 2" >> /etc/fstab
+mount -a
+chown 10001:10001 /data   # the user the worker image runs as
+
+# Blocks go to /data on the instance, not inside the container.
+# Wait until the image exists: the instance can boot before CI (or a
+# manual push) has published it, and Docker Hub can fail for a moment.
+until docker pull "${image}"; do
+  echo "image ${image} not available yet, retrying in 30 s" >&2
+  sleep 30
+done
+
+docker run -d --name worker --restart always \
+  -p 50052:50052 \
+  -v /data:/data \
+  -e WORKER_ID="$INSTANCE_ID" \
+  -e WORKER_AZ="$AZ" \
+  -e WORKER_DATA_DIR=/data \
+  -e WORKER_QUOTA_BYTES="${quota_bytes}" \
+  -e WORKER_ADVERTISE_ADDR="$PRIVATE_IP:50052" \
+  -e MASTER_ADDR="http://${master_addr}:50051" \
+  -e RUST_LOG=info \
+  "${image}"
