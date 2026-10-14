@@ -1,4 +1,4 @@
-mod block_writer;
+mod cluster;
 mod config;
 mod error;
 mod fencing;
@@ -59,7 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "worker starting"
     );
 
-    let service = WorkerSvc::new(Arc::new(storage), config.frame_size as usize);
+    let storage = Arc::new(storage);
+    let service = WorkerSvc::new(Arc::clone(&storage), config.frame_size as usize);
+
+    tokio::spawn(cluster::run(config.clone(), storage, service.fencing()));
 
     let address = SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(%address, "listening");

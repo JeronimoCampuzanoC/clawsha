@@ -1,4 +1,5 @@
 use crate::error::StorageError;
+use super::changes::{SharedChanges, lock};
 use crate::storage::meta_path_for;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -17,10 +18,12 @@ pub struct BlockWriter {
     written: u64,
     finished: bool,
     used_bytes: Arc<AtomicU64>,
+    changes: SharedChanges,
     overwrite: bool,
 }
 
 impl BlockWriter {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         file: File,
         tmp_path: PathBuf,
@@ -28,6 +31,7 @@ impl BlockWriter {
         expected_size: u64,
         expected_sha256: [u8; 32],
         used_bytes: Arc<AtomicU64>,
+        changes: SharedChanges,
         overwrite: bool,
     ) -> Self {
         Self {
@@ -40,6 +44,7 @@ impl BlockWriter {
             written: 0,
             finished: false,
             used_bytes,
+            changes,
             overwrite,
         }
     }
@@ -120,6 +125,10 @@ impl BlockWriter {
         self.used_bytes.fetch_sub(replaced_size, Ordering::SeqCst);
 
         File::open(parent)?.sync_all()?;
+
+        if let Some(name) = self.final_path.file_name().and_then(|n| n.to_str()) {
+            lock(&self.changes).new_blocks.push(name.to_string());
+        }
         Ok(())
     }
 }

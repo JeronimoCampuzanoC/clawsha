@@ -510,3 +510,69 @@ async fn replicate_with_a_stale_fencing_token_is_rejected() {
 
     assert_eq!(status.code(), Code::FailedPrecondition);
 }
+
+// ----- PutBlock pipeline (A stores and forwards to B) -----------------------
+
+fn with_next_worker(mut frame: BlockFrame, next_worker: &str) -> BlockFrame {
+    if let Some(Kind::Header(header)) = frame.kind.as_mut() {
+        header.next_worker = next_worker.to_string();
+    }
+    frame
+}
+
+fn pipeline_frames(next_worker: &str, parts: &[&[u8]]) -> Vec<BlockFrame> {
+    let data = parts.concat();
+    let header = header_frame(ID, data.len() as u64, sha_of(&data));
+    let mut frames = vec![with_next_worker(header, next_worker)];
+    frames.extend(parts.iter().map(|part| data_frame(part)));
+    frames
+}
+
+#[tokio::test]
+async fn pipeline_stores_the_block_on_both_workers() {
+    let (_a_dir, a, _) = setup();
+    let (_b_dir, b, b_svc) = setup();
+    let b_address = start_server(b_svc).await;
+
+    let frames = pipeline_frames(&b_address, &[b"hello ", b"distributed ", b"world"]);
+    receive_block(Arc::clone(&a), incoming(frames)).await.unwrap();
+
+    for storage in [&a, &b] {
+        let stored = std::fs::read(storage.block_path(ID).unwrap()).unwrap();
+        assert_eq!(stored, b"hello distributed world");
+        storage.verify_block(ID).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn pipeline_fails_with_unavailable_and_writes_nothing_if_the_next_worker_is_down() {
+    let (a_dir, a, _) = setup();
+    // Bind and drop a listener to get a port nobody listens on.
+    let free = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dead_address = free.local_addr().unwrap().to_string();
+    drop(free);
+
+    let frames = pipeline_frames(&dead_address, &[b"hello"]);
+    let status = receive_block(Arc::clone(&a), incoming(frames)).await.unwrap_err();
+
+    assert_eq!(status.code(), Code::Unavailable);
+    assert!(!a.block_path(ID).unwrap().exists());
+    assert_eq!(a.used_bytes(), 0);
+    assert!(!a_dir.path().join("tmp").exists());
+}
+
+#[tokio::test]
+async fn pipeline_leaves_no_copy_on_a_if_the_next_worker_rejects_the_block() {
+    let (a_dir, a, _) = setup();
+    let (_b_dir, b, b_svc) = setup();
+    let b_address = start_server(b_svc).await;
+    store_block(&b, ID, b"hello");
+
+    let frames = pipeline_frames(&b_address, &[b"hello"]);
+    let status = receive_block(Arc::clone(&a), incoming(frames)).await.unwrap_err();
+
+    assert_eq!(status.code(), Code::AlreadyExists);
+    assert!(!a.block_path(ID).unwrap().exists());
+    assert_eq!(a.used_bytes(), 0);
+    assert_eq!(std::fs::read_dir(a_dir.path().join("tmp")).unwrap().count(), 0);
+}

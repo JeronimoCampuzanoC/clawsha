@@ -9,7 +9,7 @@ dotenvy = "0.15.7"
 prost = "0.14.4"
 sha2 = "0.11.0"
 thiserror = "2.0.21"
-tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1.19", features = ["net"] }
 tonic = "0.14.6"
 tonic-prost = "0.14.6"

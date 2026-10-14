@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::atomic::Ordering;
 
 use super::Storage;
+use super::changes::lock;
 use super::checksum::meta_path_for;
 use super::fs_util::{io_to_storage, read_dir_if_exists};
 use crate::error::StorageError;
@@ -14,6 +15,7 @@ impl Storage {
         fs::remove_file(&path).map_err(io_to_storage)?;
         self.used_bytes.fetch_sub(size, Ordering::SeqCst);
         let _ = fs::remove_file(meta_path_for(&path));
+        lock(&self.changes).removed_blocks.push(block_id.to_string());
 
         Ok(size)
     }

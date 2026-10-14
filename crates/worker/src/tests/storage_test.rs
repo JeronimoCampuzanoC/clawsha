@@ -580,3 +580,32 @@ fn normal_write_still_refuses_an_existing_block() {
 
     assert!(matches!(result, Err(StorageError::AlreadyExists)));
 }
+
+#[test]
+fn writes_and_deletes_are_tracked_until_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+
+    put(&storage, ID, &[b"hello"]).unwrap();
+    storage.delete_block(ID).unwrap();
+
+    let changes = storage.take_changes();
+    assert_eq!(changes.new_blocks, vec![ID.to_string()]);
+    assert_eq!(changes.removed_blocks, vec![ID.to_string()]);
+    assert_eq!(storage.take_changes(), Default::default());
+}
+
+#[test]
+fn restored_changes_come_before_newer_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_path_buf());
+
+    put(&storage, ID, &[b"hello"]).unwrap();
+    let old = storage.take_changes();
+    storage.delete_block(ID).unwrap();
+    storage.restore_changes(old);
+
+    let changes = storage.take_changes();
+    assert_eq!(changes.new_blocks, vec![ID.to_string()]);
+    assert_eq!(changes.removed_blocks, vec![ID.to_string()]);
+}

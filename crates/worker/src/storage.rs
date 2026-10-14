@@ -1,3 +1,5 @@
+mod block_writer;
+mod changes;
 mod checksum;
 mod fs_util;
 mod listing;
@@ -14,7 +16,11 @@ use uuid::Uuid;
 
 use crate::error::StorageError;
 
+pub(crate) use block_writer::BlockWriter;
+pub(crate) use changes::SharedChanges;
 pub(crate) use checksum::meta_path_for;
+#[allow(unused_imports)]
+pub use changes::Changes;
 // Part of the public API; only used by tests until the BlockReport is built.
 #[allow(unused_imports)]
 pub use listing::BlockInfo;
@@ -23,6 +29,7 @@ pub struct Storage {
     pub data_dir: PathBuf,
     quota_bytes: u64,
     used_bytes: Arc<AtomicU64>,
+    changes: SharedChanges,
 }
 
 impl Storage {
@@ -31,6 +38,7 @@ impl Storage {
             data_dir,
             quota_bytes: u64::MAX,
             used_bytes: Arc::new(AtomicU64::new(0)),
+            changes: SharedChanges::default(),
         }
     }
 

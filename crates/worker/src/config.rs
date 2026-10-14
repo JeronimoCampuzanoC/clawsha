@@ -17,6 +17,14 @@ pub struct Config {
     #[arg(long, env = "WORKER_PORT", default_value_t = 50052)]
     pub port: u16,
 
+    /// Address other nodes use to reach this worker (host:port).
+    #[arg(long, env = "WORKER_ADVERTISE_ADDR", default_value = "127.0.0.1:50052")]
+    pub advertise_addr: String,
+
+    /// Address of the master's gRPC port (the NLB in production).
+    #[arg(long, env = "MASTER_ADDR", default_value = "http://127.0.0.1:50051")]
+    pub master_addr: String,
+
     /// Directory that holds blocks/ and tmp/.
     #[arg(long, env = "WORKER_DATA_DIR", default_value = "/data")]
     pub data_dir: PathBuf,

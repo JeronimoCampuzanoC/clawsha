@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::sync::Arc;
 
 use super::Storage;
-use crate::block_writer::BlockWriter;
+use super::block_writer::BlockWriter;
 use crate::error::StorageError;
 
 impl Storage {
@@ -63,6 +63,7 @@ impl Storage {
             expected_size,
             expected_sha256,
             Arc::clone(&self.used_bytes),
+            Arc::clone(&self.changes),
             overwrite,
         ))
     }
