@@ -36,9 +36,10 @@ module "network" {
 module "security" {
   source = "./modules/security"
 
-  name     = var.name
-  vpc_id   = module.network.vpc_id
-  vpc_cidr = module.network.vpc_cidr
+  name         = var.name
+  vpc_id       = module.network.vpc_id
+  vpc_cidr     = module.network.vpc_cidr
+  gateway_port = var.gateway_port
 }
 
 module "data" {
@@ -101,9 +102,20 @@ module "edge" {
   ami_id                = data.aws_ami.al2023.id
   instance_type         = var.gateway_instance_type
   instance_profile_name = var.instance_profile_name
+  gateway_port          = var.gateway_port
 
   user_data = templatefile("${path.module}/scripts/gateway.sh.tftpl", {
     image       = var.gateway_image
+    port        = var.gateway_port
     master_addr = module.control.internal_nlb_dns
+    jwt_secret  = random_password.jwt_secret.result
   })
 }
+
+# Secret the gateways sign the session tokens with. Generated once and kept in
+# the Terraform state, so both gateways share it and it survives re-applies.
+resource "random_password" "jwt_secret" {
+  length  = 48
+  special = false
+}
+

@@ -1,5 +1,6 @@
-# Public entry point: an internet-facing NLB on :443 in front of one gateway
-# per AZ. The NLB only forwards TCP; the gateway terminates TLS itself.
+# Public entry point: an internet-facing NLB on :80 in front of one gateway
+# per AZ, forwarded to the gateway's own port. The gateway speaks plain HTTP
+# for now; TLS (:443) comes when it has a certificate.
 
 resource "aws_launch_template" "gateway" {
   name_prefix   = "${var.name}-gateway-"
@@ -33,9 +34,9 @@ resource "aws_lb" "public" {
   enable_cross_zone_load_balancing = true
 }
 
-resource "aws_lb_target_group" "https" {
-  name                 = "${var.name}-gateways-https"
-  port                 = 443
+resource "aws_lb_target_group" "api" {
+  name                 = "${var.name}-gateways-api"
+  port                 = var.gateway_port
   protocol             = "TCP"
   vpc_id               = var.vpc_id
   deregistration_delay = 30
@@ -48,14 +49,14 @@ resource "aws_lb_target_group" "https" {
   }
 }
 
-resource "aws_lb_listener" "https" {
+resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.public.arn
-  port              = 443
+  port              = 80
   protocol          = "TCP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.https.arn
+    target_group_arn = aws_lb_target_group.api.arn
   }
 }
 
@@ -65,7 +66,7 @@ resource "aws_autoscaling_group" "gateways" {
   max_size            = length(var.subnet_ids)
   desired_capacity    = length(var.subnet_ids)
   vpc_zone_identifier = var.subnet_ids
-  target_group_arns   = [aws_lb_target_group.https.arn]
+  target_group_arns   = [aws_lb_target_group.api.arn]
   health_check_type   = "EC2"
 
   launch_template {

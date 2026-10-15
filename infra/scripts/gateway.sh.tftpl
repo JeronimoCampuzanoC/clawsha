@@ -6,8 +6,6 @@ set -euxo pipefail
 dnf install -y docker
 systemctl enable --now docker
 
-# TODO(C): the gateway's config does not exist yet. The variable names and
-# the container port below are placeholders; match them to its config.rs.
 # Wait until the image exists: the instance can boot before CI (or a
 # manual push) has published it, and Docker Hub can fail for a moment.
 until docker pull "${image}"; do
@@ -15,8 +13,12 @@ until docker pull "${image}"; do
   sleep 30
 done
 
+# GATEWAY_ADDR must be 0.0.0.0: the default 127.0.0.1 is unreachable from
+# outside the container. Variable names come from crates/gateway/src/main.rs.
 docker run -d --name gateway --restart always \
-  -p 443:443 \
-  -e MASTER_ADDR="http://${master_addr}:50051" \
-  -e RUST_LOG=info \
+  -p ${port}:${port} \
+  -e GATEWAY_ADDR="0.0.0.0:${port}" \
+  -e MASTER_ADDRESS="http://${master_addr}:50051" \
+  -e JWT_SECRET="${jwt_secret}" \
+  -e RUST_LOG=gateway=info \
   "${image}"
