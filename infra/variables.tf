@@ -105,3 +105,9 @@ variable "worker_cpu_scale_out_percent" {
   type    = number
   default = 70
 }
+
+variable "gateway_port" {
+  description = "Port the gateway container listens on (GATEWAY_ADDR)."
+  type        = number
+  default     = 3000
+}

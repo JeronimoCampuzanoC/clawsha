@@ -31,3 +31,8 @@ variable "user_data" {
   description = "Rendered infra/scripts/gateway.sh.tftpl."
   type        = string
 }
+
+variable "gateway_port" {
+  description = "Port the gateway container listens on; the NLB forwards :80 to it."
+  type        = number
+}

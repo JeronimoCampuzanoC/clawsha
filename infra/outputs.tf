@@ -4,7 +4,7 @@ output "masters_internal_dns" {
 }
 
 output "public_dns" {
-  description = "Public NLB of the gateways (port 443); null until gateway_image is set."
+  description = "Public NLB of the gateways: http://<this>/ (port 80); null until gateway_image is set."
   value       = one(module.edge[*].public_nlb_dns)
 }
 

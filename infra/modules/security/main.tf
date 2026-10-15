@@ -7,13 +7,13 @@
 
 resource "aws_security_group" "gateway" {
   name        = "${var.name}-gateway"
-  description = "Gateways: HTTPS from the internet (through the public NLB)"
+  description = "Gateways: HTTP API from the internet (through the public NLB)"
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "HTTPS; the NLB keeps the client IP, so the source is the internet"
-    from_port   = 443
-    to_port     = 443
+    description = "Gateway API; the NLB keeps the client IP, so the source is the internet"
+    from_port   = var.gateway_port
+    to_port     = var.gateway_port
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
