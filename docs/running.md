@@ -149,22 +149,21 @@ cargo run -p master -- --id master-b --az b --port 50062 --health-port 8082 \
   --advertise-addr 127.0.0.1:50062 --dynamodb-endpoint http://localhost:8000 --create-tables
 ```
 
-## 3. Local, clúster completo (cuando estén worker y gateway)
+## 3. Local, clúster completo
 
 La idea del plan es un solo `compose`:
 
 ```bash
-docker compose -f deploy/compose.local.yml up --build
+docker compose -f deploy/compose.local.yml pull
+docker compose -f deploy/compose.local.yml up -d
 ```
 
-Hoy el archivo trae `dynamodb`, `master-a` (gRPC 50051, health 8081) y
-`master-b` (50052, 8082). Lo que falta agregar:
+El archivo levanta `dynamodb`, dos masters, dos workers y un gateway:
 
 | Servicio | Quién | Qué necesita |
 | --- | --- | --- |
-| `worker-a1`, `worker-a2`, `worker-b1`, `worker-b2` | B | `WORKER_ID`, `WORKER_AZ` (a/b), `WORKER_DATA_DIR` con un volumen, `WORKER_QUOTA_BYTES`, y la dirección del master para los heartbeats. En local no hay NLB: el worker puede recibir los dos masters y reintentar contra el que no responda `UNAVAILABLE` |
-| `gateway-a`, `gateway-b` | C | Puerto 443 (o 8443 en local), secreto del JWT, dirección de los masters (igual: los dos, o un "NLB" de mentira como un `nginx` que haga el health check de `/health/leader`) y acceso a los workers |
-| `frontend` | C | Lo sirve el propio gateway |
+| `worker-a`, `worker-b` | B | `WORKER_ID`, `WORKER_AZ`, `WORKER_DATA_DIR` con un volumen, `WORKER_QUOTA_BYTES` y la dirección del master |
+| `gateway` | C | Puerto 3001 en local, secreto del JWT y dirección del master |
 
 Flujo esperado cuando todo esté: el navegador entra al gateway, el gateway
 pide `StartUpload` al master líder, manda los bloques a los workers con

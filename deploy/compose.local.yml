@@ -1,9 +1,11 @@
-# Local cluster for development: DynamoDB Local plus two masters that compete
-# for the leader lease. Workers and the gateway get added by B and C.
+# Local cluster for development: DynamoDB Local, two masters, two workers and
+# one gateway.
 #
-#   docker compose -f deploy/compose.local.yml up --build
+#   docker compose -f deploy/compose.local.yml pull
+#   docker compose -f deploy/compose.local.yml up -d
 #   curl localhost:8081/health/leader   # 200 on the leader, 503 on the standby
 #   curl localhost:8082/health/leader
+#   curl localhost:3001/api/v1/auth/login
 #
 # Only the database is needed to run the master tests from the host:
 #   docker compose -f deploy/compose.local.yml up -d dynamodb
@@ -13,13 +15,16 @@ services:
   dynamodb:
     image: amazon/dynamodb-local:latest
     command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000 >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
     ports:
       - "8000:8000"
 
   master-a:
-    build:
-      context: ..
-      dockerfile: deploy/docker/master.Dockerfile
+    image: samuelmarti22/clawsha-master:latest
     environment:
       MASTER_ID: master-a
       MASTER_AZ: a
@@ -35,12 +40,11 @@ services:
       - "50051:50051"
       - "8081:8080"
     depends_on:
-      - dynamodb
+      dynamodb:
+        condition: service_healthy
 
   master-b:
-    build:
-      context: ..
-      dockerfile: deploy/docker/master.Dockerfile
+    image: samuelmarti22/clawsha-master:latest
     environment:
       MASTER_ID: master-b
       MASTER_AZ: b
@@ -55,4 +59,60 @@ services:
       - "50052:50051"
       - "8082:8080"
     depends_on:
-      - dynamodb
+      dynamodb:
+        condition: service_healthy
+
+  worker-a:
+    image: samuelmarti22/clawsha-worker:latest
+    environment:
+      WORKER_ID: worker-a
+      WORKER_AZ: a
+      WORKER_PORT: "50052"
+      WORKER_ADVERTISE_ADDR: worker-a:50052
+      MASTER_ADDR: http://master-b:50051
+      WORKER_DATA_DIR: /data
+      WORKER_QUOTA_BYTES: "2147483648"
+      RUST_LOG: info
+    ports:
+      - "50053:50052"
+    volumes:
+      - worker-a-data:/data
+    depends_on:
+      master-b:
+        condition: service_started
+
+  worker-b:
+    image: samuelmarti22/clawsha-worker:latest
+    environment:
+      WORKER_ID: worker-b
+      WORKER_AZ: b
+      WORKER_PORT: "50052"
+      WORKER_ADVERTISE_ADDR: worker-b:50052
+      MASTER_ADDR: http://master-b:50051
+      WORKER_DATA_DIR: /data
+      WORKER_QUOTA_BYTES: "2147483648"
+      RUST_LOG: info
+    ports:
+      - "50054:50052"
+    volumes:
+      - worker-b-data:/data
+    depends_on:
+      master-b:
+        condition: service_started
+
+  gateway:
+    image: samuelmarti22/clawsha-gateway:latest
+    environment:
+      MASTER_ADDRESS: http://master-b:50051
+      JWT_SECRET: local-development-secret-change-me
+      GATEWAY_ADDR: 0.0.0.0:3000
+      RUST_LOG: info
+    ports:
+      - "3001:3000"
+    depends_on:
+      master-b:
+        condition: service_started
+
+volumes:
+  worker-a-data:
+  worker-b-data:

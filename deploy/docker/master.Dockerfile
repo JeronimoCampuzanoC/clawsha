@@ -2,7 +2,7 @@
 #   docker build -f deploy/docker/master.Dockerfile -t dfsha-master .
 # Two stages so the final image carries only the binary (no toolchain).
 
-FROM rust:1.90-bookworm AS build
+FROM rust:1-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
