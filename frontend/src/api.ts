@@ -114,6 +114,17 @@ export function listFiles(path = "/"): Promise<DirectoryListing> {
   });
 }
 
+export interface CreateDirResult {
+  path: string;
+}
+
+export function createDir(path: string): Promise<CreateDirResult> {
+  const query = new URLSearchParams({ path });
+  return request<CreateDirResult>(`/api/v1/dirs?${query.toString()}`, {
+    method: "POST",
+  });
+}
+
 export interface UploadResult {
   path: string;
   inode_id: string;

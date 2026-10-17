@@ -9,6 +9,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import {
   ApiError,
+  createDir,
   listFiles,
   uploadFile,
   type FileEntry,
@@ -37,9 +38,25 @@ function joinPath(dir: string, name: string): string {
   return `${base}${name}`.replace(/\/{2,}/g, "/");
 }
 
+interface Crumb {
+  name: string;
+  path: string;
+}
+
+/// Breaks "/a/b" into clickable crumbs: root first, then each level with its
+/// absolute path, so the breadcrumb can jump straight to any ancestor.
+function pathSegments(path: string): Crumb[] {
+  const crumbs: Crumb[] = [{ name: "Inicio", path: "/" }];
+  let acc = "";
+  for (const part of path.split("/").filter(Boolean)) {
+    acc = `${acc}/${part}`;
+    crumbs.push({ name: part, path: acc });
+  }
+  return crumbs;
+}
+
 export default function FilesPage() {
   const [path, setPath] = useState("/");
-  const [inputPath, setInputPath] = useState("/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,6 +67,11 @@ export default function FilesPage() {
   const [uploadInfo, setUploadInfo] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [dirName, setDirName] = useState("");
+  const [creatingDir, setCreatingDir] = useState(false);
+  const [dirError, setDirError] = useState<string | null>(null);
+  const [dirInfo, setDirInfo] = useState<string | null>(null);
 
   const { signOut } = useAuth();
   const navigate = useNavigate();
@@ -83,9 +105,8 @@ export default function FilesPage() {
     load(path);
   }, [path, load]);
 
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setPath(inputPath.trim() || "/");
+  function navigateTo(target: string) {
+    setPath(target || "/");
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -124,6 +145,34 @@ export default function FilesPage() {
     }
   }
 
+  async function handleCreateDir(event: FormEvent) {
+    event.preventDefault();
+    const name = dirName.trim();
+    if (!name) return;
+    if (name.includes("/")) {
+      setDirError("El nombre no puede contener «/».");
+      return;
+    }
+    setCreatingDir(true);
+    setDirError(null);
+    setDirInfo(null);
+    const target = joinPath(path, name);
+    try {
+      await createDir(target);
+      setDirInfo(`Carpeta «${name}» creada.`);
+      setDirName("");
+      await load(path);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      setDirError(err instanceof ApiError ? err.message : "Error inesperado");
+    } finally {
+      setCreatingDir(false);
+    }
+  }
+
   function handleLogout() {
     signOut();
     navigate("/login");
@@ -137,83 +186,128 @@ export default function FilesPage() {
           Cerrar sesión
         </button>
       </header>
-      <div className="container">
-        <div className="card" style={{ marginBottom: "1.5rem" }}>
-          <h2>Subir archivo</h2>
-          <form onSubmit={handleUpload}>
-            <input
-              ref={fileInputRef}
-              type="file"
-              onChange={handleFileChange}
-              disabled={uploading}
-            />
-            {selectedFile && (
-              <div className="switch">
-                Destino: <code>{joinPath(path, selectedFile.name)}</code> (
-                {formatSize(selectedFile.size)})
-              </div>
-            )}
-            {uploadError && <div className="error">{uploadError}</div>}
-            {uploadInfo && <div className="badge">{uploadInfo}</div>}
-            {uploading && (
-              <div className="progress" aria-label={`Progreso ${progress}%`}>
-                <div className="progress-bar" style={{ width: `${progress}%` }}>
-                  {progress}%
+
+      <div className="drive">
+        <aside className="sidebar">
+          <div className="card">
+            <h2>Crear carpeta</h2>
+            <form onSubmit={handleCreateDir}>
+              <input
+                type="text"
+                value={dirName}
+                onChange={(e) => {
+                  setDirName(e.target.value);
+                  setDirError(null);
+                  setDirInfo(null);
+                }}
+                placeholder="nombre-de-carpeta"
+                disabled={creatingDir}
+              />
+              <button type="submit" disabled={!dirName.trim() || creatingDir}>
+                {creatingDir ? "Creando…" : "Crear carpeta"}
+              </button>
+            </form>
+            {dirError && <div className="error">{dirError}</div>}
+            {dirInfo && <div className="badge">{dirInfo}</div>}
+          </div>
+
+          <div className="card">
+            <h2>Subir archivo</h2>
+            <form onSubmit={handleUpload}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileChange}
+                disabled={uploading}
+              />
+              {selectedFile && (
+                <div className="switch">
+                  {formatSize(selectedFile.size)}
                 </div>
-              </div>
+              )}
+              {uploadError && <div className="error">{uploadError}</div>}
+              {uploadInfo && <div className="badge">{uploadInfo}</div>}
+              {uploading && (
+                <div className="progress" aria-label={`Progreso ${progress}%`}>
+                  <div
+                    className="progress-bar"
+                    style={{ width: `${progress}%` }}
+                  >
+                    {progress}%
+                  </div>
+                </div>
+              )}
+              <button type="submit" disabled={!selectedFile || uploading}>
+                {uploading ? "Subiendo…" : "Subir aquí"}
+              </button>
+            </form>
+          </div>
+        </aside>
+
+        <section className="content">
+          <nav className="breadcrumb" aria-label="Ruta actual">
+            {pathSegments(path).map((crumb, index, all) => {
+              const isCurrent = index === all.length - 1;
+              return (
+                <span key={crumb.path} style={{ display: "contents" }}>
+                  {index > 0 && <span className="sep">/</span>}
+                  <button
+                    type="button"
+                    className={`crumb${isCurrent ? " current" : ""}`}
+                    onClick={() => !isCurrent && navigateTo(crumb.path)}
+                    disabled={isCurrent || loading}
+                  >
+                    {crumb.name}
+                  </button>
+                </span>
+              );
+            })}
+          </nav>
+
+          <div className="card">
+            {error && <div className="error">{error}</div>}
+
+            {!error && entries.length === 0 && !loading && (
+              <div className="empty">Esta carpeta está vacía.</div>
             )}
-            <button type="submit" disabled={!selectedFile || uploading}>
-              {uploading ? "Subiendo…" : "Subir al directorio actual"}
-            </button>
-          </form>
-        </div>
 
-        <div className="card">
-          <form className="toolbar" onSubmit={handleSubmit}>
-            <input
-              type="text"
-              value={inputPath}
-              onChange={(e) => setInputPath(e.target.value)}
-              placeholder="/ruta"
-            />
-            <button type="submit" disabled={loading}>
-              {loading ? "Cargando…" : "Listar"}
-            </button>
-          </form>
-
-          {error && <div className="error">{error}</div>}
-
-          {!error && entries.length === 0 && !loading && (
-            <div className="empty">No hay archivos en «{path}».</div>
-          )}
-
-          {entries.length > 0 && (
-            <table>
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Tipo</th>
-                  <th>Tamaño</th>
-                  <th>Modificado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => (
-                  <tr key={entry.name}>
-                    <td>{entry.name}</td>
-                    <td>
-                      <span className="badge">{entry.kind}</span>
-                    </td>
-                    <td>
-                      {entry.kind === "directory" ? "—" : formatSize(entry.size)}
-                    </td>
-                    <td>{formatDate(entry.modified_at)}</td>
+            {entries.length > 0 && (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Tipo</th>
+                    <th>Tamaño</th>
+                    <th>Modificado</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                </thead>
+                <tbody>
+                  {entries.map((entry) => {
+                    const isDir = entry.kind === "directory";
+                    return (
+                      <tr
+                        key={entry.name}
+                        onDoubleClick={() =>
+                          isDir && navigateTo(joinPath(path, entry.name))
+                        }
+                        style={{ cursor: isDir ? "pointer" : "default" }}
+                      >
+                        <td>
+                          {isDir ? "📁" : "📄"} {entry.name}
+                        </td>
+                        <td>
+                          <span className="badge">{entry.kind}</span>
+                        </td>
+                        <td>{isDir ? "—" : formatSize(entry.size)}</td>
+                        <td>{formatDate(entry.modified_at)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
       </div>
     </>
   );

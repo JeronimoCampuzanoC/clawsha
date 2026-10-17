@@ -173,3 +173,82 @@ th {
   transition: width 0.15s ease;
   min-width: 2rem;
 }
+
+/* ---- Drive-like layout -------------------------------------------------- */
+
+.drive {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1.25rem;
+  max-width: 1100px;
+  margin: 1.25rem auto;
+  padding: 0 1.25rem;
+  align-items: start;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: sticky;
+  top: 1.25rem;
+}
+
+.sidebar .card {
+  padding: 1rem;
+}
+
+.sidebar h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.75rem;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  background: #fff;
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  box-shadow: 0 2px 12px rgba(22, 33, 62, 0.08);
+  font-size: 0.95rem;
+}
+
+.breadcrumb .crumb {
+  background: none;
+  border: none;
+  color: #0f3460;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  width: auto;
+}
+
+.breadcrumb .crumb:hover {
+  background: #e6ecf7;
+  text-decoration: none;
+}
+
+.breadcrumb .crumb.current {
+  color: #1a1a2e;
+  cursor: default;
+}
+
+.breadcrumb .crumb.current:hover {
+  background: none;
+}
+
+.breadcrumb .sep {
+  color: #9aa0bd;
+  user-select: none;
+}
+

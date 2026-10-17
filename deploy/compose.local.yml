@@ -111,7 +111,7 @@ services:
       - "3001:3000"
     depends_on:
       master-b:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   worker-a-data:

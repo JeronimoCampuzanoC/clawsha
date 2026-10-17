@@ -1,5 +1,5 @@
 use axum::{
-	extract::{Extension, Request, State},
+	extract::{Extension, Query, Request, State},
 	http::{StatusCode, header::CONTENT_LENGTH},
 	response::IntoResponse,
 	Json,
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{auth::AuthenticatedUser, pb::FileInfo, state::AppState};
 
-use super::{UploadError, UploadService, worker::WorkerUploadError};
+use super::{MkdirError, UploadError, UploadService, worker::WorkerUploadError};
 
 #[derive(Debug, Deserialize)]
 pub struct UploadQuery {
@@ -52,6 +52,30 @@ pub async fn upload(
 	))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MkdirQuery {
+	pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MkdirResponse {
+	pub path: String,
+}
+
+pub async fn mkdir(
+	State(state): State<AppState>,
+	Extension(user): Extension<AuthenticatedUser>,
+	Query(query): Query<MkdirQuery>,
+) -> Result<impl IntoResponse, StatusCode> {
+	let service = UploadService::new(state.master);
+	service
+		.mkdir(user.user_id, query.path.clone())
+		.await
+		.map_err(map_mkdir_error)?;
+
+	Ok((StatusCode::CREATED, Json(MkdirResponse { path: query.path })))
+}
+
 impl From<FileInfo> for UploadResponse {
 	fn from(file: FileInfo) -> Self {
 		Self {
@@ -86,5 +110,17 @@ fn map_upload_error(error: UploadError) -> StatusCode {
 		},
 		UploadError::Lease(_) => StatusCode::SERVICE_UNAVAILABLE,
 		UploadError::Body(_) | UploadError::InvalidBodySize => StatusCode::BAD_REQUEST,
+	}
+}
+
+fn map_mkdir_error(error: MkdirError) -> StatusCode {
+	match error {
+		MkdirError::Master(status) => match status.code() {
+			tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+			tonic::Code::NotFound => StatusCode::NOT_FOUND,
+			tonic::Code::AlreadyExists | tonic::Code::FailedPrecondition => StatusCode::CONFLICT,
+			tonic::Code::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+			_ => StatusCode::BAD_GATEWAY,
+		},
 	}
 }
