@@ -43,6 +43,16 @@ pub fn split_parent(path: &str) -> Result<(Vec<String>, String), MasterError> {
     }
 }
 
+/// The name an upload gets when `name` is taken: the number goes before the
+/// extension, so "a.mp4" becomes "a (1).mp4". A leading dot is not an
+/// extension (".env" becomes ".env (1)").
+pub fn numbered_name(name: &str, n: u32) -> String {
+    match name.rfind('.') {
+        Some(dot) if dot > 0 => format!("{} ({n}){}", &name[..dot], &name[dot..]),
+        _ => format!("{name} ({n})"),
+    }
+}
+
 /// One directory-entry name: no dots-only names, no control characters,
 /// not longer than MAX_NAME_LEN bytes.
 pub fn check_name(name: &str) -> Result<(), MasterError> {

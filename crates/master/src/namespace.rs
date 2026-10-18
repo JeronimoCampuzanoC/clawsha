@@ -10,6 +10,9 @@ use crate::db::{Db, Fence};
 use crate::error::MasterError;
 use crate::path;
 
+/// How many "name (n).ext" copies of one name we try before giving up.
+const MAX_NUMBERED_COPIES: u32 = 1000;
+
 #[derive(Clone)]
 pub struct Namespace {
     db: Db,
@@ -88,6 +91,37 @@ impl Namespace {
             return Err(MasterError::NotFound);
         }
         Ok((parent, name))
+    }
+
+    /// The path a new upload should use. If `path` is not taken by a committed
+    /// file, it is returned as is. If it is, the first free "name (n).ext" in
+    /// the same directory is returned instead, so the upload becomes a new,
+    /// unrelated file and the existing one is never replaced.
+    ///
+    /// A directory with that name is left alone: the upload then fails with
+    /// AlreadyExists, as before.
+    pub async fn free_file_path(&self, user_id: &str, path: &str) -> Result<String, MasterError> {
+        let (parent, name) = path::split_parent(path)?;
+        match self.resolve(user_id, path).await {
+            Ok(existing) if existing.kind == InodeType::File => {}
+            Ok(_) | Err(MasterError::NotFound) => return Ok(path.to_string()),
+            Err(e) => return Err(e),
+        }
+
+        let dir = if parent.is_empty() {
+            String::new()
+        } else {
+            format!("/{}", parent.join("/"))
+        };
+        for n in 1..=MAX_NUMBERED_COPIES {
+            let candidate = format!("{dir}/{}", path::numbered_name(&name, n));
+            match self.resolve(user_id, &candidate).await {
+                Err(MasterError::NotFound) => return Ok(candidate),
+                Ok(_) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(MasterError::AlreadyExists)
     }
 
     pub async fn list(&self, user_id: &str, path: &str) -> Result<Vec<Inode>, MasterError> {

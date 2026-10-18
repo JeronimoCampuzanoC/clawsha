@@ -1,5 +1,6 @@
-# Local cluster for development: DynamoDB Local, two masters, two workers,
-# one gateway and the frontend in front of it.
+# Local cluster for development: DynamoDB Local, two masters behind a leader
+# proxy (the local stand-in for the internal NLB), two workers and one gateway.
+# Workers and the gateway talk to master-lb:50051, never to a master directly.
 #
 #   docker compose -f deploy/compose.local.yml pull
 #   docker compose -f deploy/compose.local.yml up -d
@@ -63,6 +64,20 @@ services:
       dynamodb:
         condition: service_healthy
 
+  # Internal-NLB equivalent: routes to whichever master answers 200 on
+  # /health/leader (see deploy/haproxy.cfg).
+  master-lb:
+    image: haproxy:lts-alpine
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "50050:50051"
+    depends_on:
+      master-a:
+        condition: service_healthy
+      master-b:
+        condition: service_healthy
+
   worker-a:
     image: samuelmarti22/clawsha-worker:latest
     environment:
@@ -70,7 +85,7 @@ services:
       WORKER_AZ: a
       WORKER_PORT: "50052"
       WORKER_ADVERTISE_ADDR: worker-a:50052
-      MASTER_ADDR: http://master-b:50051
+      MASTER_ADDR: http://master-lb:50051
       WORKER_DATA_DIR: /data
       WORKER_QUOTA_BYTES: "2147483648"
       RUST_LOG: info
@@ -79,7 +94,7 @@ services:
     volumes:
       - worker-a-data:/data
     depends_on:
-      master-b:
+      master-lb:
         condition: service_started
 
   worker-b:
@@ -89,7 +104,7 @@ services:
       WORKER_AZ: b
       WORKER_PORT: "50052"
       WORKER_ADVERTISE_ADDR: worker-b:50052
-      MASTER_ADDR: http://master-b:50051
+      MASTER_ADDR: http://master-lb:50051
       WORKER_DATA_DIR: /data
       WORKER_QUOTA_BYTES: "2147483648"
       RUST_LOG: info
@@ -98,22 +113,25 @@ services:
     volumes:
       - worker-b-data:/data
     depends_on:
-      master-b:
+      master-lb:
         condition: service_started
 
   gateway:
     image: samuelmarti22/clawsha-gateway:latest
     environment:
-      MASTER_ADDRESS: http://master-b:50051
+      MASTER_ADDRESS: http://master-lb:50051
       JWT_SECRET: local-development-secret-change-me
       GATEWAY_ENCRYPTION_KEY: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
       GATEWAY_ADDR: 0.0.0.0:3000
       RUST_LOG: info
     ports:
       - "3001:3000"
+    # It connects to the master at startup and exits if there is no leader yet
+    # (the first election takes a few seconds), so let Docker retry it.
+    restart: on-failure
     depends_on:
-      master-b:
-        condition: service_healthy
+      master-lb:
+        condition: service_started
 
   frontend:
     image: samuelmarti22/clawsha-frontend:latest
