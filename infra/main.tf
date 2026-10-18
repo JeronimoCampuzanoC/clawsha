@@ -113,6 +113,7 @@ module "edge" {
     frontend_port  = var.frontend_port
     master_addr    = module.control.internal_nlb_dns
     jwt_secret     = random_password.jwt_secret.result
+    encryption_key = random_id.encryption_key.hex
   })
 }
 
@@ -121,5 +122,14 @@ module "edge" {
 resource "random_password" "jwt_secret" {
   length  = 48
   special = false
+}
+
+# 32 random bytes, rendered as 64 hex characters, for block-at-rest encryption.
+# random_id.hex is guaranteed valid hex of exactly byte_length*2 chars, which
+# the gateway decodes to a 32-byte ChaCha20 key. Generated once and kept in the
+# state so both gateways share it and it survives re-applies; if it ever
+# changes, blocks written with the old key can no longer be decrypted.
+resource "random_id" "encryption_key" {
+  byte_length = 32
 }
 

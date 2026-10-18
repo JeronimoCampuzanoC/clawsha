@@ -106,6 +106,7 @@ services:
     environment:
       MASTER_ADDRESS: http://master-b:50051
       JWT_SECRET: local-development-secret-change-me
+      GATEWAY_ENCRYPTION_KEY: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
       GATEWAY_ADDR: 0.0.0.0:3000
       RUST_LOG: info
     ports:

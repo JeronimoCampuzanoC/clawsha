@@ -35,7 +35,7 @@ pub async fn download(
 	Extension(user): Extension<AuthenticatedUser>,
 	Query(query): Query<DownloadQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-	let service = DownloadService::new(state.master);
+	let service = DownloadService::new(state.master, state.cipher);
 	let (info, stream) = service
 		.open(user.user_id, query.path.clone())
 		.await

@@ -10,6 +10,7 @@ use super::{
 	master::DownloadMaster,
 	worker::{BlockReadError, BlockReader},
 };
+use crate::encript::CipherService;
 
 /// How many verified blocks may sit in the response channel waiting to be
 /// written to the client. Keeps memory bounded on slow clients.
@@ -32,13 +33,15 @@ pub struct DownloadInfo {
 pub struct DownloadService {
 	master: DownloadMaster,
 	reader: BlockReader,
+	cipher: CipherService,
 }
 
 impl DownloadService {
-	pub fn new(master: MasterClient) -> Self {
+	pub fn new(master: MasterClient, cipher: CipherService) -> Self {
 		Self {
 			master: DownloadMaster::new(master),
 			reader: BlockReader,
+			cipher,
 		}
 	}
 
@@ -103,7 +106,13 @@ impl DownloadService {
 				.read(&replica.addr, &block.block_id, block.size, &block.sha256)
 				.await
 			{
-				Ok(bytes) => return Ok(bytes),
+				// The worker returns ciphertext, already verified against the
+				// plan's sha256 (which is the hash of the ciphertext). Decrypt
+				// it with the block id before handing the plaintext to the
+				// client.
+				Ok(ciphertext) => {
+					return Ok(self.cipher.decrypt(&block.block_id, ciphertext));
+				}
 				Err(error) => {
 					if error.is_corruption() {
 						self.master

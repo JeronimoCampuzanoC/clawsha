@@ -27,6 +27,7 @@ docker run -d --name gateway --restart always \
   -e GATEWAY_ADDR="0.0.0.0:${port}" \
   -e MASTER_ADDRESS="http://${master_addr}:50051" \
   -e JWT_SECRET="${jwt_secret}" \
+  -e GATEWAY_ENCRYPTION_KEY="${encryption_key}" \
   -e RUST_LOG=gateway=info \
   "${image}"
 
