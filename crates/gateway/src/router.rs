@@ -8,7 +8,8 @@ pub fn router(state: AppState) -> Router {
 	Router::new()
 		.merge(crate::auth::router(state.clone()))
 		.merge(crate::read::router(state.clone()))
-		.merge(crate::upload::router(state))
+		.merge(crate::upload::router(state.clone()))
+		.merge(crate::download::router(state))
 		.layer(cors_layer())
 }
 

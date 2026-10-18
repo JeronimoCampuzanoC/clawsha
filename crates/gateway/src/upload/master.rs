@@ -2,7 +2,7 @@ use tonic::Status;
 
 use crate::{
 	grpc::MasterClient,
-	pb::{AbortUploadRequest, BlockAssignment, CommitUploadRequest, FileInfo, Lease, LeaseRequest, StartUploadRequest, UploadPlan},
+	pb::{AbortUploadRequest, BlockAssignment, CommitUploadRequest, Empty, FileInfo, Lease, LeaseRequest, StartUploadRequest, UploadPlan},
 };
 
 #[derive(Clone)]
@@ -13,6 +13,14 @@ pub struct UploadMaster {
 impl UploadMaster {
 	pub fn new(client: MasterClient) -> Self {
 		Self { client }
+	}
+
+	pub async fn mkdir(
+		&self,
+		user_id: String,
+		path: String,
+	) -> Result<Empty, Status> {
+		self.client.mkdir(user_id, path).await
 	}
 
 	pub async fn start(

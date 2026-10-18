@@ -36,6 +36,12 @@ pub enum UploadError {
 	Lease(String),
 }
 
+#[derive(Debug, Error)]
+pub enum MkdirError {
+	#[error("master rejected mkdir: {0}")]
+	Master(#[from] Status),
+}
+
 #[derive(Clone)]
 pub struct UploadService {
 	master: UploadMaster,
@@ -48,6 +54,14 @@ impl UploadService {
 			master: UploadMaster::new(master),
 			workers: BlockSender,
 		}
+	}
+
+	/// Creates a single directory. The master's Mkdir is not recursive, so the
+	/// immediate parent must already exist; it reports AlreadyExists if the
+	/// directory is already there and NotFound if the parent is missing.
+	pub async fn mkdir(&self, user_id: String, path: String) -> Result<(), MkdirError> {
+		self.master.mkdir(user_id, path).await?;
+		Ok(())
 	}
 
 	pub async fn upload(

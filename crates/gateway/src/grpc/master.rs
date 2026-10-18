@@ -11,10 +11,13 @@ use crate::pb::{
 	AbortUploadRequest,
 	BlockAssignment,
 	CommitUploadRequest,
+	CorruptionReport,
 	Empty,
 	FileInfo,
 	Lease,
 	LeaseRequest,
+	ReadPlan,
+	ReadPlanRequest,
 	ReassignBlockRequest,
 	StartUploadRequest,
 	UploadPlan,
@@ -27,12 +30,21 @@ pub struct MasterClient {
 }
 
 impl MasterClient {
-	pub async fn connect(address: impl Into<String>) -> Result<Self, tonic::transport::Error> {
-		let endpoint = Endpoint::from_shared(address.into())?;
-		let client = endpoint.connect().await?;
+	/// Builds a client without opening a TCP connection yet. The channel
+	/// connects on the first RPC and reconnects on its own if the master goes
+	/// away, so the gateway can start before the master is up and survive a
+	/// master restart or failover. The per-RPC timeout keeps a call from
+	/// hanging forever while the master is unreachable; the caller sees it as
+	/// a transport error and maps it to 503.
+	pub fn connect(address: impl Into<String>) -> Result<Self, tonic::transport::Error> {
+		let endpoint = Endpoint::from_shared(address.into())?
+			.connect_timeout(std::time::Duration::from_secs(5))
+			.timeout(std::time::Duration::from_secs(30))
+			.tcp_keepalive(Some(std::time::Duration::from_secs(30)));
+		let channel = endpoint.connect_lazy();
 
 		Ok(Self {
-			client: MasterServiceClient::new(client),
+			client: MasterServiceClient::new(channel),
 		})
 	}
 
@@ -67,6 +79,37 @@ impl MasterClient {
 	) -> Result<ListResponse, Status> {
 		let mut client = self.client.clone();
 		let response = client.list(PathRequest { user_id, path }).await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn get_read_plan(
+		&self,
+		request: ReadPlanRequest,
+	) -> Result<ReadPlan, Status> {
+		let mut client = self.client.clone();
+		let response = client.get_read_plan(request).await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn report_corruption(
+		&self,
+		request: CorruptionReport,
+	) -> Result<Empty, Status> {
+		let mut client = self.client.clone();
+		let response = client.report_corruption(request).await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn mkdir(
+		&self,
+		user_id: String,
+		path: String,
+	) -> Result<Empty, Status> {
+		let mut client = self.client.clone();
+		let response = client.mkdir(PathRequest { user_id, path }).await?;
 
 		Ok(response.into_inner())
 	}
