@@ -1,0 +1,29 @@
+# Builds master, worker and gateway from this checkout instead of pulling the
+# prebuilt images (which may be for another CPU architecture).
+#
+#   docker compose -f deploy/compose.local.yml -f deploy/compose.build.yml up -d --build
+
+services:
+  master-a:
+    build:
+      context: ..
+      dockerfile: deploy/docker/master.Dockerfile
+    image: dfsha-master:local
+
+  master-b:
+    image: dfsha-master:local
+
+  worker-a:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker.Dockerfile
+    image: dfsha-worker:local
+
+  worker-b:
+    image: dfsha-worker:local
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/docker/gateway.Dockerfile
+    image: dfsha-gateway:local
