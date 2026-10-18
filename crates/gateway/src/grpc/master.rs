@@ -11,10 +11,13 @@ use crate::pb::{
 	AbortUploadRequest,
 	BlockAssignment,
 	CommitUploadRequest,
+	CorruptionReport,
 	Empty,
 	FileInfo,
 	Lease,
 	LeaseRequest,
+	ReadPlan,
+	ReadPlanRequest,
 	ReassignBlockRequest,
 	StartUploadRequest,
 	UploadPlan,
@@ -76,6 +79,26 @@ impl MasterClient {
 	) -> Result<ListResponse, Status> {
 		let mut client = self.client.clone();
 		let response = client.list(PathRequest { user_id, path }).await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn get_read_plan(
+		&self,
+		request: ReadPlanRequest,
+	) -> Result<ReadPlan, Status> {
+		let mut client = self.client.clone();
+		let response = client.get_read_plan(request).await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn report_corruption(
+		&self,
+		request: CorruptionReport,
+	) -> Result<Empty, Status> {
+		let mut client = self.client.clone();
+		let response = client.report_corruption(request).await?;
 
 		Ok(response.into_inner())
 	}

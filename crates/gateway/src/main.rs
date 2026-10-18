@@ -1,4 +1,5 @@
 mod auth;
+mod download;
 mod grpc;
 mod read;
 mod router;

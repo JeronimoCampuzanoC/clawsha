@@ -15,6 +15,7 @@ import {
   type FileEntry,
 } from "../api";
 import { useAuth } from "../auth";
+import FilePreview from "../components/FilePreview";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -72,6 +73,8 @@ export default function FilesPage() {
   const [creatingDir, setCreatingDir] = useState(false);
   const [dirError, setDirError] = useState<string | null>(null);
   const [dirInfo, setDirInfo] = useState<string | null>(null);
+
+  const [preview, setPreview] = useState<FileEntry | null>(null);
 
   const { signOut } = useAuth();
   const navigate = useNavigate();
@@ -279,6 +282,7 @@ export default function FilesPage() {
                     <th>Tipo</th>
                     <th>Tamaño</th>
                     <th>Modificado</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -288,9 +292,11 @@ export default function FilesPage() {
                       <tr
                         key={entry.name}
                         onDoubleClick={() =>
-                          isDir && navigateTo(joinPath(path, entry.name))
+                          isDir
+                            ? navigateTo(joinPath(path, entry.name))
+                            : setPreview(entry)
                         }
-                        style={{ cursor: isDir ? "pointer" : "default" }}
+                        style={{ cursor: "pointer" }}
                       >
                         <td>
                           {isDir ? "📁" : "📄"} {entry.name}
@@ -300,6 +306,17 @@ export default function FilesPage() {
                         </td>
                         <td>{isDir ? "—" : formatSize(entry.size)}</td>
                         <td>{formatDate(entry.modified_at)}</td>
+                        <td>
+                          {!isDir && (
+                            <button
+                              type="button"
+                              className="link"
+                              onClick={() => setPreview(entry)}
+                            >
+                              Abrir
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -309,6 +326,15 @@ export default function FilesPage() {
           </div>
         </section>
       </div>
+
+      {preview && (
+        <FilePreview
+          path={joinPath(path, preview.name)}
+          entry={preview}
+          onClose={() => setPreview(null)}
+          onUnauthorized={handleUnauthorized}
+        />
+      )}
     </>
   );
 }

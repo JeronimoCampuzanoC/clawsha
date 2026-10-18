@@ -2,7 +2,9 @@ use futures::Stream;
 use tonic::Status;
 use tonic::transport::{Channel, Endpoint};
 
-use crate::pb::{BlockFrame, PutBlockResponse, worker_service_client::WorkerServiceClient};
+use crate::pb::{
+	BlockFrame, GetBlockRequest, PutBlockResponse, worker_service_client::WorkerServiceClient,
+};
 
 #[derive(Clone)]
 pub struct WorkerClient {
@@ -31,6 +33,16 @@ impl WorkerClient {
 	{
 		let mut client = self.client.clone();
 		let response = client.put_block(frames).await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn get_block(
+		&self,
+		request: GetBlockRequest,
+	) -> Result<tonic::Streaming<BlockFrame>, Status> {
+		let mut client = self.client.clone();
+		let response = client.get_block(request).await?;
 
 		Ok(response.into_inner())
 	}

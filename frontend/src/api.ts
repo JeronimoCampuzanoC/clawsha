@@ -179,3 +179,98 @@ export function uploadFile(
     xhr.send(file);
   });
 }
+
+/// Files larger than this are not previewed in the browser; the user is asked
+/// to download instead. Keeps memory and latency sane for a Blob-based viewer.
+export const PREVIEW_MAX_BYTES = 10 * 1024 * 1024; // 10 MiB
+
+type PreviewKind = "image" | "pdf" | "text" | "audio" | "video";
+
+const PREVIEW_BY_EXT: Record<string, PreviewKind> = {
+  png: "image",
+  jpg: "image",
+  jpeg: "image",
+  gif: "image",
+  webp: "image",
+  pdf: "pdf",
+  txt: "text",
+  log: "text",
+  md: "text",
+  json: "text",
+  csv: "text",
+  mp3: "audio",
+  wav: "audio",
+  mp4: "video",
+  webm: "video",
+};
+
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+/// What kind of in-browser preview a file supports, or null if none. Size is
+/// checked separately so the caller can show a clear "too large" message.
+export function previewKind(name: string): PreviewKind | null {
+  return PREVIEW_BY_EXT[extensionOf(name)] ?? null;
+}
+
+function fileUrl(path: string, disposition: "inline" | "attachment"): string {
+  const query = new URLSearchParams({ path, disposition });
+  return `${BASE_URL}/api/v1/files?${query.toString()}`;
+}
+
+/// Fetches a file into a Blob, sending the bearer token (which a plain <a> or
+/// <img src> cannot do). Returns an object URL the caller must revoke when
+/// done. Used for inline previews.
+export async function fetchFileBlobUrl(path: string): Promise<string> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(fileUrl(path, "inline"), { headers });
+  } catch {
+    throw new ApiError(0, "No se pudo conectar con el gateway");
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, errorMessage(response.status));
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+/// Triggers a browser download. Fetches with the token into a Blob, then clicks
+/// a temporary object-URL link so the file lands in the user's downloads.
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(fileUrl(path, "attachment"), { headers });
+  } catch {
+    throw new ApiError(0, "No se pudo conectar con el gateway");
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, errorMessage(response.status));
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+export type { PreviewKind };
