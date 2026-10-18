@@ -22,12 +22,10 @@ struct Cluster {
     config: Config,
     storage: Arc<Storage>,
     fencing: Arc<Fencing>,
-    /// Fencing of the leader that has our last full report. None until the first one.
     reported_fencing: Option<u64>,
     last_report: Instant,
 }
 
-/// Runs until the process stops. Start it with tokio::spawn.
 pub async fn run(config: Config, storage: Arc<Storage>, fencing: Arc<Fencing>) {
     // A lazy channel connects on first use and reconnects by itself.
     let channel = Endpoint::from_shared(config.master_addr.clone())
@@ -62,7 +60,6 @@ pub async fn run(config: Config, storage: Arc<Storage>, fencing: Arc<Fencing>) {
 }
 
 impl Cluster {
-    /// One round: heartbeat, then a block report if the answer or the clock asks for it.
     async fn beat(&mut self) -> Result<(), Status> {
         let leader_fencing = self.heartbeat().await?;
 
@@ -73,7 +70,6 @@ impl Cluster {
         Ok(())
     }
 
-    /// Sends usage and the block changes. Returns the leader's fencing.
     async fn heartbeat(&mut self) -> Result<u64, Status> {
         let changes = self.storage.take_changes();
         let request = HeartbeatRequest {
@@ -126,12 +122,10 @@ impl Cluster {
     }
 }
 
-/// Every block on disk with its size and stored checksum.
 fn list_entries(storage: &Storage) -> Result<Vec<BlockEntry>, crate::error::StorageError> {
     let mut entries = Vec::new();
     for block in storage.list_blocks()? {
         let block_id = block.block_id.hyphenated().to_string();
-        // A block without a readable checksum is damaged: leave it out of the report.
         let Ok(sha256) = storage.stored_checksum(&block_id) else {
             warn!(%block_id, "block has no checksum, not reported");
             continue;

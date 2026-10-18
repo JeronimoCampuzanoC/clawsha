@@ -17,9 +17,7 @@ impl Fencing {
         self.highest.load(Ordering::SeqCst)
     }
 
-    /// Accepts an order that carries `token`, or rejects it if the token is stale.
     pub fn check(&self, token: u64) -> Result<(), Status> {
-        // fetch_max stores the larger value and returns the previous one, atomically.
         let previous = self.highest.fetch_max(token, Ordering::SeqCst);
 
         if token < previous {

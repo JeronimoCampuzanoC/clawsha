@@ -1,11 +1,12 @@
-# Local cluster for development: DynamoDB Local, two masters, two workers and
-# one gateway.
+# Local cluster for development: DynamoDB Local, two masters, two workers,
+# one gateway and the frontend in front of it.
 #
 #   docker compose -f deploy/compose.local.yml pull
 #   docker compose -f deploy/compose.local.yml up -d
 #   curl localhost:8081/health/leader   # 200 on the leader, 503 on the standby
 #   curl localhost:8082/health/leader
 #   curl localhost:3001/api/v1/auth/login
+#   open http://localhost:8088              # frontend; /api/ goes to the gateway
 #
 # Only the database is needed to run the master tests from the host:
 #   docker compose -f deploy/compose.local.yml up -d dynamodb
@@ -112,6 +113,15 @@ services:
     depends_on:
       master-b:
         condition: service_healthy
+
+  frontend:
+    image: samuelmarti22/clawsha-frontend:latest
+    environment:
+      GATEWAY_UPSTREAM: gateway:3000
+    ports:
+      - "8088:80"
+    depends_on:
+      - gateway
 
 volumes:
   worker-a-data:

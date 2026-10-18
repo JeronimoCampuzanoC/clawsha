@@ -133,7 +133,6 @@ impl WorkerService for WorkerSvc {
 
         info!(%block_id, %target, overwrite, "ReplicateBlock requested");
 
-        // 1. Only the current leader may give orders.
         self.fencing
             .check(fencing)
             .inspect_err(|status| log_failure("ReplicateBlock", &block_id, status))?;
@@ -141,7 +140,6 @@ impl WorkerService for WorkerSvc {
             return Err(Status::invalid_argument("target must not be empty"));
         }
 
-        // 2. Check the local copy and open it.
         let storage = Arc::clone(&self.storage);
         let id = block_id.clone();
         let source = blocking(move || prepare_replica(&storage, &id))
@@ -149,12 +147,10 @@ impl WorkerService for WorkerSvc {
             .inspect_err(|status| log_failure("ReplicateBlock", &block_id, status))?;
         let size = source.size;
 
-        // 3. Connect to the target worker.
         let mut client = connect_to(&target)
             .await
             .inspect_err(|status| log_failure("ReplicateBlock", &block_id, status))?;
 
-        // 4. Build the outgoing stream: header first, then data frames from a blocking thread.
         let (tx, rx) = mpsc::channel::<BlockFrame>(CHANNEL_CAPACITY);
         let header = replica_header(&block_id, &source, overwrite);
         tx.send(header)
@@ -165,7 +161,6 @@ impl WorkerService for WorkerSvc {
         let file = source.file;
         tokio::task::spawn_blocking(move || send_replica_frames(file, frame_size, tx));
 
-        // 5. Send the stream and wait for the target to confirm.
         client
             .put_block(ReceiverStream::new(rx))
             .await
@@ -177,7 +172,6 @@ impl WorkerService for WorkerSvc {
     }
 }
 
-/// One warn line per rejected request, with the gRPC code the caller will see.
 fn log_failure(rpc: &str, block_id: &str, status: &Status) {
     warn!(rpc, block_id, code = ?status.code(), message = status.message(), "request failed");
 }
