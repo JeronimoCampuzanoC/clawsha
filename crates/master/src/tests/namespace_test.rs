@@ -385,10 +385,7 @@ async fn free_file_path_numbers_a_taken_name_and_skips_taken_numbers() {
     assert_eq!(ns.free_file_path(U1, "/dir").await.unwrap(), "/dir");
 
     // Another user's file does not count.
-    assert_eq!(
-        ns.free_file_path(U2, "/top.txt").await.unwrap(),
-        "/top.txt"
-    );
+    assert_eq!(ns.free_file_path(U2, "/top.txt").await.unwrap(), "/top.txt");
 
     t.cleanup().await;
 }

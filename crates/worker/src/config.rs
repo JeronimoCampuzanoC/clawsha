@@ -36,4 +36,10 @@ pub struct Config {
     /// Maximum size of a single frame in bytes (default 256 KiB, max 1 MiB).
     #[arg(long,env = "WORKER_FRAME_SIZE",default_value_t = 262_144,value_parser = clap::value_parser!(u32).range(1..=1_048_576))]
     pub frame_size: u32,
+
+    /// Seconds between two full scrubs of the blocks on disk; 0 turns the
+    /// scrubber off. Default 600 (10 minutes), meant for demos: in a real
+    /// deployment this should be much longer.
+    #[arg(long, env = "WORKER_SCRUB_INTERVAL_SECS", default_value_t = 600)]
+    pub scrub_interval_secs: u64,
 }

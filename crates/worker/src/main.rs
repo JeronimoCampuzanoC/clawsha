@@ -2,6 +2,7 @@ mod cluster;
 mod config;
 mod error;
 mod fencing;
+mod scrubber;
 mod service;
 mod storage;
 #[cfg(test)]
@@ -60,7 +61,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = Arc::new(storage);
     let service = WorkerSvc::new(Arc::clone(&storage), config.frame_size as usize);
 
-    tokio::spawn(cluster::run(config.clone(), storage, service.fencing()));
+    tokio::spawn(cluster::run(
+        config.clone(),
+        Arc::clone(&storage),
+        service.fencing(),
+    ));
+    if config.scrub_interval_secs > 0 {
+        tokio::spawn(scrubber::run(config.clone(), Arc::clone(&storage)));
+    } else {
+        info!("scrubber disabled (WORKER_SCRUB_INTERVAL_SECS=0)");
+    }
 
     let address = SocketAddr::from(([0, 0, 0, 0], config.port));
     info!(%address, "listening");

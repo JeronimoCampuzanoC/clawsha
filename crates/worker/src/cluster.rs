@@ -26,13 +26,17 @@ struct Cluster {
     last_report: Instant,
 }
 
-pub async fn run(config: Config, storage: Arc<Storage>, fencing: Arc<Fencing>) {
-    // A lazy channel connects on first use and reconnects by itself.
-    let channel = Endpoint::from_shared(config.master_addr.clone())
+/// A lazy channel connects on first use and reconnects by itself.
+pub(crate) fn master_channel(master_addr: &str) -> Channel {
+    Endpoint::from_shared(master_addr.to_string())
         .expect("master address is not a valid URI")
         .connect_timeout(Duration::from_secs(3))
         .timeout(Duration::from_secs(10))
-        .connect_lazy();
+        .connect_lazy()
+}
+
+pub async fn run(config: Config, storage: Arc<Storage>, fencing: Arc<Fencing>) {
+    let channel = master_channel(&config.master_addr);
 
     let mut cluster = Cluster {
         client: ClusterServiceClient::new(channel),

@@ -27,3 +27,9 @@ services:
       context: ..
       dockerfile: deploy/docker/gateway.Dockerfile
     image: dfsha-gateway:local
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/docker/frontend.Dockerfile
+    image: dfsha-frontend:local

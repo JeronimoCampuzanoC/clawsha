@@ -13,6 +13,8 @@ impl Fencing {
         Self::default()
     }
 
+    /// The highest token seen so far. Only the tests read it.
+    #[cfg(test)]
     pub fn current(&self) -> u64 {
         self.highest.load(Ordering::SeqCst)
     }
