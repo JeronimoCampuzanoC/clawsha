@@ -4,6 +4,7 @@ mod checksum;
 mod fs_util;
 mod listing;
 mod maintenance;
+mod quarantine;
 mod quota;
 mod read;
 mod write;

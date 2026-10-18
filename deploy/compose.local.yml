@@ -88,6 +88,8 @@ services:
       MASTER_ADDR: http://master-lb:50051
       WORKER_DATA_DIR: /data
       WORKER_QUOTA_BYTES: "2147483648"
+      # Short on purpose so the scrubber is easy to watch; the default is 600.
+      WORKER_SCRUB_INTERVAL_SECS: "30"
       RUST_LOG: info
     ports:
       - "50053:50052"
@@ -107,6 +109,8 @@ services:
       MASTER_ADDR: http://master-lb:50051
       WORKER_DATA_DIR: /data
       WORKER_QUOTA_BYTES: "2147483648"
+      # Short on purpose so the scrubber is easy to watch; the default is 600.
+      WORKER_SCRUB_INTERVAL_SECS: "30"
       RUST_LOG: info
     ports:
       - "50054:50052"
