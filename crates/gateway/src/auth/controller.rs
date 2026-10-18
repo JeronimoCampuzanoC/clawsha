@@ -76,9 +76,21 @@ fn map_auth_error(error: AuthError) -> StatusCode {
 		AuthError::Master(status) => match status.code() {
 			tonic::Code::Unauthenticated => StatusCode::UNAUTHORIZED,
 			tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+			tonic::Code::AlreadyExists => StatusCode::CONFLICT,
 			tonic::Code::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		},
 		AuthError::Jwt(_) => StatusCode::INTERNAL_SERVER_ERROR,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_taken_username_is_a_conflict_not_a_server_error() {
+		let status = tonic::Status::already_exists("username taken");
+		assert_eq!(map_auth_error(AuthError::Master(status)), StatusCode::CONFLICT);
 	}
 }
