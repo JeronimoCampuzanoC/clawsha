@@ -240,19 +240,28 @@ impl MasterService for MasterApi {
         let req = request.into_inner();
         let user = require_user(&req.user_id)?;
 
+        // Uploading over a committed file creates a new one ("a (1).pdf")
+        // instead of replacing it. A caller that holds a lock on the path
+        // asked for that exact path, so it keeps the replace behaviour.
         let lease = (!req.lease_id.is_empty()).then_some(req.lease_id.as_str());
+        let path = if lease.is_some() {
+            req.path.clone()
+        } else {
+            self.app.namespace.free_file_path(user, &req.path).await?
+        };
         let plan = self
             .app
             .uploads
-            .start(&fence, user, &req.path, req.size, lease, now_ms())
+            .start(&fence, user, &path, req.size, lease, now_ms())
             .await?;
-        tracing::info!(path = %req.path, size = req.size, blocks = plan.blocks.len(), "upload started");
+        tracing::info!(%path, size = req.size, blocks = plan.blocks.len(), "upload started");
         Ok(Response::new(pb::UploadPlan {
             inode_id: plan.inode_id,
             version_no: plan.version_no,
             lease_id: plan.lease_id,
             block_size: plan.block_size,
             blocks: plan.blocks.iter().map(assignment).collect(),
+            path,
         }))
     }
 

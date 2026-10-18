@@ -155,6 +155,10 @@ message UploadPlan {
   string lease_id = 3;      // must come back in Commit/Abort
   uint64 block_size = 4;
   repeated BlockAssignment blocks = 5;
+  // Where the file will really live. Equal to the requested path unless a
+  // committed file already had that name (then "a.pdf" becomes "a (1).pdf").
+  // The caller must use this path for everything after StartUpload.
+  string path = 6;
 }
 
 message ReassignBlockRequest {

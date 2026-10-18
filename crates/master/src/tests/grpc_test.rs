@@ -542,3 +542,107 @@ async fn explicit_lease_blocks_other_writers_and_can_be_reused_by_the_upload() {
 
     rig.app.db.delete_tables().await.unwrap();
 }
+
+#[tokio::test]
+async fn uploading_over_a_file_makes_a_numbered_copy_unless_the_path_is_locked() {
+    let Some(mut rig) = start(true).await else {
+        return;
+    };
+    for (id, az) in [("a1", "a"), ("b1", "b")] {
+        heartbeat(&mut rig, id, az).await;
+    }
+    let user = rig
+        .master
+        .register(pb::RegisterRequest {
+            username: "jero".into(),
+            password: "password123".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .user_id;
+
+    // First upload of /a.bin: the path is free, so it keeps its name.
+    let content = vec![7u8; 10];
+    let first = rig
+        .master
+        .start_upload(pb::StartUploadRequest {
+            user_id: user.clone(),
+            path: "/a.bin".into(),
+            size: 10,
+            lease_id: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(first.path, "/a.bin");
+    let acks: Vec<pb::CommittedBlock> = first
+        .blocks
+        .iter()
+        .map(|b| pb::CommittedBlock {
+            idx: b.idx,
+            block_id: b.block_id.clone(),
+            size: b.size,
+            sha256: sha(&content),
+            worker_ids: b.workers.iter().map(|w| w.worker_id.clone()).collect(),
+        })
+        .collect();
+    rig.master
+        .commit_upload(pb::CommitUploadRequest {
+            user_id: user.clone(),
+            path: first.path.clone(),
+            inode_id: first.inode_id.clone(),
+            version_no: first.version_no,
+            lease_id: first.lease_id.clone(),
+            size: 10,
+            sha256: sha(&content),
+            blocks: acks,
+        })
+        .await
+        .unwrap();
+
+    // Same path again: a different file, the committed one is not touched.
+    let second = rig
+        .master
+        .start_upload(pb::StartUploadRequest {
+            user_id: user.clone(),
+            path: "/a.bin".into(),
+            size: 10,
+            lease_id: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(second.path, "/a (1).bin");
+    assert_ne!(second.inode_id, first.inode_id);
+    assert_eq!(second.version_no, 1);
+
+    // Whoever locked the path asked for that exact path: that is a replacement.
+    let lease = rig
+        .master
+        .acquire_lease(pb::LeaseRequest {
+            user_id: user.clone(),
+            path: "/a.bin".into(),
+            ttl_seconds: 0,
+            lease_id: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let replacement = rig
+        .master
+        .start_upload(pb::StartUploadRequest {
+            user_id: user.clone(),
+            path: "/a.bin".into(),
+            size: 10,
+            lease_id: lease.lease_id.clone(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(replacement.path, "/a.bin");
+    assert_eq!(replacement.inode_id, first.inode_id);
+    assert_eq!(replacement.version_no, 2);
+
+    rig.app.db.delete_tables().await.unwrap();
+}

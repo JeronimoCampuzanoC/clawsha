@@ -1,5 +1,5 @@
 use crate::error::MasterError;
-use crate::path::{parse, split_parent};
+use crate::path::{numbered_name, parse, split_parent};
 
 #[test]
 fn root_has_no_components() {
@@ -74,4 +74,12 @@ fn root_cannot_be_split() {
         split_parent("/"),
         Err(MasterError::InvalidPath(_))
     ));
+}
+
+#[test]
+fn numbered_name_goes_before_the_extension() {
+    assert_eq!(numbered_name("a.mp4", 1), "a (1).mp4");
+    assert_eq!(numbered_name("a.tar.gz", 2), "a.tar (2).gz");
+    assert_eq!(numbered_name("notes", 1), "notes (1)");
+    assert_eq!(numbered_name(".env", 1), ".env (1)");
 }

@@ -72,6 +72,9 @@ impl UploadService {
 		body: axum::body::Body,
 	) -> Result<FileInfo, UploadError> {
 		let plan = self.master.start(user_id.clone(), path.clone(), size).await?;
+		// If the name was taken the master picked another one ("a (1).pdf");
+		// everything from here on (lease, commit, abort) must use that one.
+		let path = if plan.path.is_empty() { path } else { plan.path.clone() };
 		let (cancel_sender, cancel_rx) = oneshot::channel();
 		let mut cancel_tx = Some(cancel_sender);
 		let (lease_failure_tx, lease_failure_rx) = watch::channel(None);

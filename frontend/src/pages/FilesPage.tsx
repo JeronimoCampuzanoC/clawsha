@@ -127,10 +127,16 @@ export default function FilesPage() {
     setProgress(0);
     const target = joinPath(path, selectedFile.name);
     try {
-      await uploadFile(target, selectedFile, (loaded, total) => {
+      const result = await uploadFile(target, selectedFile, (loaded, total) => {
         setProgress(total > 0 ? Math.round((loaded / total) * 100) : 0);
       });
-      setUploadInfo(`«${selectedFile.name}» subido correctamente.`);
+      // If the name was taken, the master saved it as "name (1).ext".
+      const savedAs = result.path.split("/").pop() || selectedFile.name;
+      setUploadInfo(
+        savedAs === selectedFile.name
+          ? `«${savedAs}» subido correctamente.`
+          : `«${selectedFile.name}» ya existía: se subió como «${savedAs}».`,
+      );
       setSelectedFile(null);
       setProgress(0);
       if (fileInputRef.current) {

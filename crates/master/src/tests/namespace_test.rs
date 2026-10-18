@@ -346,3 +346,49 @@ async fn move_refuses_bad_destinations() {
 
     t.cleanup().await;
 }
+
+#[tokio::test]
+async fn free_file_path_numbers_a_taken_name_and_skips_taken_numbers() {
+    let Some(t) = test_db().await else { return };
+    let ns = Namespace::new(t.db.clone());
+    ns.mkdir(&t.fence, U1, "/docs", now_ms()).await.unwrap();
+    let docs = ns.resolve(U1, "/docs").await.unwrap();
+
+    // A free name is returned untouched.
+    assert_eq!(
+        ns.free_file_path(U1, "/docs/a.mp4").await.unwrap(),
+        "/docs/a.mp4"
+    );
+
+    put_file(&t, &docs.inode_id, "a.mp4", 10).await;
+    assert_eq!(
+        ns.free_file_path(U1, "/docs/a.mp4").await.unwrap(),
+        "/docs/a (1).mp4"
+    );
+
+    // "a (1).mp4" is taken too, so the next free number is used.
+    put_file(&t, &docs.inode_id, "a (1).mp4", 10).await;
+    assert_eq!(
+        ns.free_file_path(U1, "/docs/a.mp4").await.unwrap(),
+        "/docs/a (2).mp4"
+    );
+
+    // Works in the root as well.
+    put_file(&t, &root_id(U1), "top.txt", 1).await;
+    assert_eq!(
+        ns.free_file_path(U1, "/top.txt").await.unwrap(),
+        "/top (1).txt"
+    );
+
+    // A directory with that name is left alone (the upload will say so).
+    ns.mkdir(&t.fence, U1, "/dir", now_ms()).await.unwrap();
+    assert_eq!(ns.free_file_path(U1, "/dir").await.unwrap(), "/dir");
+
+    // Another user's file does not count.
+    assert_eq!(
+        ns.free_file_path(U2, "/top.txt").await.unwrap(),
+        "/top.txt"
+    );
+
+    t.cleanup().await;
+}
