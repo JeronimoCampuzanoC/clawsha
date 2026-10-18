@@ -1,6 +1,9 @@
 mod auth;
+mod delete;
 mod download;
+mod encript;
 mod grpc;
+mod r#move;
 mod read;
 mod router;
 mod state;
@@ -13,6 +16,7 @@ pub mod pb {
 use tokio::net::TcpListener;
 
 use auth::{AuthService, JwtService};
+use encript::CipherService;
 use grpc::MasterClient;
 use state::AppState;
 
@@ -34,7 +38,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|_| "JWT_SECRET must be configured")?;
     let jwt = JwtService::new(jwt_secret)?;
     let auth_service = AuthService::new(master, jwt);
-    let state = AppState::new(auth_service);
+
+    let encryption_key = std::env::var("GATEWAY_ENCRYPTION_KEY")
+        .map_err(|_| "GATEWAY_ENCRYPTION_KEY must be configured (32 bytes, hex or base64)")?;
+    let cipher = CipherService::new(&encryption_key)?;
+
+    let state = AppState::new(auth_service, cipher);
 
     let address = std::env::var("GATEWAY_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:3000".to_string());

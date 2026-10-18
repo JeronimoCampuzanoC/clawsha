@@ -1,8 +1,4 @@
-# Build from the repository root:
-#   docker build -f deploy/docker/worker.Dockerfile -t dfsha-worker .
-# Two stages so the final image carries only the binary (no toolchain).
 
-# ---------- Stage 1: build ----------
 FROM rust:1-slim-bookworm AS builder
 
 # protoc is needed by build.rs to generate the gRPC code.

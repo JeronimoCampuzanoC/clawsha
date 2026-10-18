@@ -6,6 +6,7 @@ use tokio::sync::{oneshot, watch};
 use tonic::Status;
 
 use crate::{
+	encript::CipherService,
 	grpc::MasterClient,
 	pb::{
 		AbortUploadRequest, BlockAssignment, CommitUploadRequest, FileInfo, LeaseRequest,
@@ -46,13 +47,15 @@ pub enum MkdirError {
 pub struct UploadService {
 	master: UploadMaster,
 	workers: BlockSender,
+	cipher: CipherService,
 }
 
 impl UploadService {
-	pub fn new(master: MasterClient) -> Self {
+	pub fn new(master: MasterClient, cipher: CipherService) -> Self {
 		Self {
 			master: UploadMaster::new(master),
 			workers: BlockSender,
+			cipher,
 		}
 	}
 
@@ -118,8 +121,12 @@ impl UploadService {
 			}
 
 			let block = pending.split_to(block_size).freeze();
+			// The whole-file hash is over the plaintext: it identifies the
+			// user's real file. The per-block hash sent to the worker is over
+			// the ciphertext and is computed per attempt inside
+			// send_block_with_retry, because a reassignment changes the block
+			// id and therefore the nonce.
 			file_hash.update(&block);
-			let block_hash = BlockSender::hash(&block);
 			let service = self.clone();
 			let user_id_for_task = user_id.clone();
 			let plan_for_task = plan.clone();
@@ -130,7 +137,6 @@ impl UploadService {
 						&plan_for_task,
 						assignment.clone(),
 						block,
-						block_hash,
 					)
 					.await
 			});
@@ -247,11 +253,16 @@ impl UploadService {
 		user_id: &str,
 		plan: &UploadPlan,
 		mut assignment: BlockAssignment,
-		block: Bytes,
-		sha256: Vec<u8>,
+		plaintext: Bytes,
 	) -> Result<CommittedBlock, UploadError> {
 		for attempt in 0..=1 {
-			match self.workers.send(&assignment, block.clone(), sha256.clone()).await {
+			// Encrypt with the current block id: the nonce is derived from it,
+			// so a reassignment (new block id) re-encrypts the same plaintext
+			// under a fresh nonce. The worker verifies, and the master stores,
+			// the hash of the ciphertext.
+			let ciphertext = self.cipher.encrypt(&assignment.block_id, plaintext.clone());
+			let sha256 = BlockSender::hash(&ciphertext);
+			match self.workers.send(&assignment, ciphertext, sha256).await {
 				Ok(committed) => return Ok(committed),
 				Err(_error) if attempt == 0 => {
 					let excluded_worker_ids = assignment

@@ -97,6 +97,49 @@ button.link:hover {
   text-decoration: underline;
 }
 
+/* ---- Row action buttons ------------------------------------------------- */
+
+.actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #cfd3e4;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f3460;
+  font-size: 0.8rem;
+  font-weight: 600;
+  width: auto;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.action-btn:hover {
+  background: #eef2fb;
+  border-color: #0f3460;
+}
+
+.action-btn.danger {
+  color: #c0392b;
+  border-color: #f0c2bd;
+}
+
+.action-btn.danger:hover {
+  background: #fdecea;
+  border-color: #c0392b;
+  color: #c0392b;
+}
+
+.action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .error {
   color: #c0392b;
   background: #fdecea;

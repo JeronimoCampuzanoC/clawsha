@@ -7,6 +7,7 @@
 #   curl localhost:8081/health/leader   # 200 on the leader, 503 on the standby
 #   curl localhost:8082/health/leader
 #   curl localhost:3001/api/v1/auth/login
+#   open http://localhost:8088              # frontend; /api/ goes to the gateway
 #
 # Only the database is needed to run the master tests from the host:
 #   docker compose -f deploy/compose.local.yml up -d dynamodb
@@ -120,6 +121,7 @@ services:
     environment:
       MASTER_ADDRESS: http://master-lb:50051
       JWT_SECRET: local-development-secret-change-me
+      GATEWAY_ENCRYPTION_KEY: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
       GATEWAY_ADDR: 0.0.0.0:3000
       RUST_LOG: info
     ports:
@@ -130,6 +132,15 @@ services:
     depends_on:
       master-lb:
         condition: service_started
+
+  frontend:
+    image: samuelmarti22/clawsha-frontend:latest
+    environment:
+      GATEWAY_UPSTREAM: gateway:3000
+    ports:
+      - "8088:80"
+    depends_on:
+      - gateway
 
 volumes:
   worker-a-data:

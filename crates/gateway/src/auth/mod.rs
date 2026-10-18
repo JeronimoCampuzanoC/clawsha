@@ -5,7 +5,7 @@ mod middleware;
 
 pub use auth_service::{AuthError, AuthResponse, AuthService, RegistrationResponse};
 pub use middleware::{AuthenticatedUser, authenticate};
-pub use jwt_service::{Claims, JwtError, JwtService};
+pub use jwt_service::{JwtError, JwtService};
 
 use axum::{Router, routing::post};
 

@@ -7,13 +7,13 @@
 
 resource "aws_security_group" "gateway" {
   name        = "${var.name}-gateway"
-  description = "Gateways: HTTP API from the internet (through the public NLB)"
+  description = "Gateways: nginx (SPA + /api proxy) from the internet through the public NLB"
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "Gateway API; the NLB keeps the client IP, so the source is the internet"
-    from_port   = var.gateway_port
-    to_port     = var.gateway_port
+    description = "nginx; the NLB keeps the client IP, so the source is the internet"
+    from_port   = var.frontend_port
+    to_port     = var.frontend_port
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }

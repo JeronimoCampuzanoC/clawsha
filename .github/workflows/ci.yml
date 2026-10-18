@@ -34,7 +34,7 @@ jobs:
           DFSHA_TEST_DYNAMO_ENDPOINT: http://localhost:8000
         run: cargo test --workspace
 
-  # Builds and publishes the three images. It deliberately has no `needs:` on
+  # Builds and publishes the four images. It deliberately has no `needs:` on
   # the rust job, so it runs in parallel and still publishes even if the Rust
   # checks fail (as requested). It only runs on push (not pull_request) so a
   # fork PR can never log in with the Docker Hub token.
@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [master, worker, gateway]
+        component: [master, worker, gateway, frontend]
     steps:
       - uses: actions/checkout@v4
 

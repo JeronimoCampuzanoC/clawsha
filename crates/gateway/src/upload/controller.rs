@@ -40,7 +40,7 @@ pub async fn upload(
 		.and_then(|value| value.parse::<u64>().ok())
 		.ok_or(StatusCode::LENGTH_REQUIRED)?;
 
-	let service = UploadService::new(state.master);
+	let service = UploadService::new(state.master, state.cipher);
 	let file = service
 		.upload(user.user_id, query.path, size, request.into_body())
 		.await
@@ -67,7 +67,7 @@ pub async fn mkdir(
 	Extension(user): Extension<AuthenticatedUser>,
 	Query(query): Query<MkdirQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-	let service = UploadService::new(state.master);
+	let service = UploadService::new(state.master, state.cipher);
 	service
 		.mkdir(user.user_id, query.path.clone())
 		.await

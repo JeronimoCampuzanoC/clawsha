@@ -1,8 +1,3 @@
-# Build from the repository root:
-#   docker build -f deploy/docker/gateway.Dockerfile \
-#     -t samuelmarti22/clawsha-gateway:latest .
-# The final image contains only the gateway binary and runtime certificates.
-
 FROM rust:1-slim-bookworm AS builder
 
 RUN apt-get update \
