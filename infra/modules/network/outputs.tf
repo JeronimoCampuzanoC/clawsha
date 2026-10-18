@@ -17,3 +17,7 @@ output "master_subnet_ids" {
 output "worker_subnet_ids" {
   value = aws_subnet.worker[*].id
 }
+
+output "gateway_subnet_ids" {
+  value = aws_subnet.gateway[*].id
+}

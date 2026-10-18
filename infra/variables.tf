@@ -56,6 +56,12 @@ variable "gateway_image" {
   default     = ""
 }
 
+variable "frontend_image" {
+  description = "nginx + SPA, next to each gateway. Empty = no gateways or public NLB yet."
+  type        = string
+  default     = ""
+}
+
 # ----- sizes -----------------------------------------------------------------
 
 variable "master_instance_type" {
@@ -107,7 +113,13 @@ variable "worker_cpu_scale_out_percent" {
 }
 
 variable "gateway_port" {
-  description = "Port the gateway container listens on (GATEWAY_ADDR)."
+  description = "Port the gateway container listens on (GATEWAY_ADDR); only nginx reaches it."
   type        = number
   default     = 3000
+}
+
+variable "frontend_port" {
+  description = "Port nginx publishes on the gateway nodes; the public NLB forwards :443 to it."
+  type        = number
+  default     = 80
 }

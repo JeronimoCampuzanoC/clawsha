@@ -4,8 +4,18 @@ output "masters_internal_dns" {
 }
 
 output "public_dns" {
-  description = "Public NLB of the gateways: http://<this>/ (port 80); null until gateway_image is set."
+  description = "Public NLB of the gateways (port 443); null until gateway_image and frontend_image are set."
   value       = one(module.edge[*].public_nlb_dns)
+}
+
+output "api_url" {
+  description = "https://<public_dns>; null until gateway_image and frontend_image are set."
+  value       = one(module.edge[*].api_url)
+}
+
+output "api_ca_pem" {
+  description = "Self-signed certificate of the API, for clients to trust it."
+  value       = one(module.edge[*].api_ca_pem)
 }
 
 output "dynamodb_tables" {

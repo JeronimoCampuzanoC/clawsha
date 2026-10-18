@@ -6,8 +6,13 @@ variable "vpc_id" {
   type = string
 }
 
+variable "public_subnet_ids" {
+  description = "The public subnets, one per AZ, for the NLB."
+  type        = list(string)
+}
+
 variable "subnet_ids" {
-  description = "The public subnets, one per AZ."
+  description = "The private gateway subnets, one per AZ, for the instances."
   type        = list(string)
 }
 
@@ -32,7 +37,7 @@ variable "user_data" {
   type        = string
 }
 
-variable "gateway_port" {
-  description = "Port the gateway container listens on; the NLB forwards :80 to it."
+variable "frontend_port" {
+  description = "Port nginx publishes on the instance; the NLB forwards :443 to it after TLS."
   type        = number
 }

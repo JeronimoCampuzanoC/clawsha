@@ -1,5 +1,6 @@
 # DFSha on AWS: one region, two AZs. Per AZ:
-#   public subnet   gateway + NAT gateway
+#   public subnet   public NLB + NAT gateway
+#   private subnet  gateway + frontend (reachable only through the public NLB)
 #   private subnet  master (one leads, the other waits as standby)
 #   private subnet  workers (blocks on an EBS volume of the instance)
 # plus the DynamoDB tables, an internal NLB that always points at the leading
@@ -36,10 +37,10 @@ module "network" {
 module "security" {
   source = "./modules/security"
 
-  name         = var.name
-  vpc_id       = module.network.vpc_id
-  vpc_cidr     = module.network.vpc_cidr
-  gateway_port = var.gateway_port
+  name          = var.name
+  vpc_id        = module.network.vpc_id
+  vpc_cidr      = module.network.vpc_cidr
+  frontend_port = var.frontend_port
 }
 
 module "data" {
@@ -93,22 +94,25 @@ module "workers" {
 
 module "edge" {
   source = "./modules/edge"
-  count  = var.gateway_image == "" ? 0 : 1
+  count  = var.gateway_image == "" || var.frontend_image == "" ? 0 : 1
 
   name                  = var.name
   vpc_id                = module.network.vpc_id
-  subnet_ids            = module.network.public_subnet_ids
+  public_subnet_ids     = module.network.public_subnet_ids
+  subnet_ids            = module.network.gateway_subnet_ids
   security_group_id     = module.security.gateway_sg_id
   ami_id                = data.aws_ami.al2023.id
   instance_type         = var.gateway_instance_type
   instance_profile_name = var.instance_profile_name
-  gateway_port          = var.gateway_port
+  frontend_port         = var.frontend_port
 
   user_data = templatefile("${path.module}/scripts/gateway.sh.tftpl", {
-    image       = var.gateway_image
-    port        = var.gateway_port
-    master_addr = module.control.internal_nlb_dns
-    jwt_secret  = random_password.jwt_secret.result
+    image          = var.gateway_image
+    port           = var.gateway_port
+    frontend_image = var.frontend_image
+    frontend_port  = var.frontend_port
+    master_addr    = module.control.internal_nlb_dns
+    jwt_secret     = random_password.jwt_secret.result
   })
 }
 

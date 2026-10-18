@@ -1,7 +1,8 @@
-# VPC with three subnets per AZ:
-#   public   gateways, NAT gateway          10.0.0.0/24,  10.0.1.0/24
+# VPC with four subnets per AZ:
+#   public   public NLB, NAT gateway        10.0.0.0/24,  10.0.1.0/24
 #   master   one master per AZ (private)    10.0.10.0/24, 10.0.11.0/24
 #   worker   workers (private)              10.0.20.0/24, 10.0.21.0/24
+#   gateway  gateways (private)             10.0.30.0/24, 10.0.31.0/24
 
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
@@ -46,6 +47,16 @@ resource "aws_subnet" "worker" {
   tags = { Name = "${var.name}-worker-${var.azs[count.index]}" }
 }
 
+# No public IPs: the only way in from the internet is the public NLB on :443.
+resource "aws_subnet" "gateway" {
+  count             = length(var.azs)
+  vpc_id            = aws_vpc.this.id
+  availability_zone = var.azs[count.index]
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, 30 + count.index)
+
+  tags = { Name = "${var.name}-gateway-${var.azs[count.index]}" }
+}
+
 # ----- public routing: straight to the internet gateway ---------------------
 
 resource "aws_route_table" "public" {
@@ -86,7 +97,7 @@ resource "aws_nat_gateway" "this" {
   depends_on = [aws_internet_gateway.this]
 }
 
-# ----- private routing: one table per AZ, shared by its master and worker subnet
+# ----- private routing: one table per AZ, shared by its private subnets
 
 resource "aws_route_table" "private" {
   count  = length(var.azs)
@@ -109,6 +120,12 @@ resource "aws_route_table_association" "master" {
 resource "aws_route_table_association" "worker" {
   count          = length(var.azs)
   subnet_id      = aws_subnet.worker[count.index].id
+  route_table_id = aws_route_table.private[count.index].id
+}
+
+resource "aws_route_table_association" "gateway" {
+  count          = length(var.azs)
+  subnet_id      = aws_subnet.gateway[count.index].id
   route_table_id = aws_route_table.private[count.index].id
 }
 

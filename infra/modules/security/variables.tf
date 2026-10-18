@@ -10,7 +10,7 @@ variable "vpc_cidr" {
   type = string
 }
 
-variable "gateway_port" {
-  description = "Port the gateway container listens on."
+variable "frontend_port" {
+  description = "Port nginx (frontend + /api proxy) publishes on the gateway nodes."
   type        = number
 }
