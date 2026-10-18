@@ -11,6 +11,8 @@ import {
   ApiError,
   createDir,
   listFiles,
+  moveEntry,
+  removeEntry,
   uploadFile,
   type FileEntry,
 } from "../api";
@@ -75,6 +77,12 @@ export default function FilesPage() {
   const [dirInfo, setDirInfo] = useState<string | null>(null);
 
   const [preview, setPreview] = useState<FileEntry | null>(null);
+
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [moving, setMoving] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   const { signOut } = useAuth();
   const navigate = useNavigate();
@@ -176,9 +184,91 @@ export default function FilesPage() {
     }
   }
 
+  async function handleDelete(entry: FileEntry) {
+    const isDir = entry.kind === "directory";
+    const target = joinPath(path, entry.name);
+    const label = isDir ? "la carpeta" : "el archivo";
+    if (!window.confirm(`¿Eliminar ${label} «${entry.name}»?`)) {
+      return;
+    }
+
+    setDeleting(target);
+    setDeleteError(null);
+    try {
+      await removeEntry(target, false);
+      await load(path);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      // 409 on a directory means it is not empty: offer a recursive delete.
+      if (err instanceof ApiError && err.status === 409 && isDir) {
+        const confirmed = window.confirm(
+          `La carpeta «${entry.name}» no está vacía. ¿Eliminarla con todo su contenido?`,
+        );
+        if (!confirmed) {
+          return;
+        }
+        try {
+          await removeEntry(target, true);
+          await load(path);
+        } catch (recursiveErr) {
+          if (recursiveErr instanceof ApiError && recursiveErr.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+          setDeleteError(
+            recursiveErr instanceof ApiError
+              ? recursiveErr.message
+              : "Error inesperado",
+          );
+        }
+        return;
+      }
+      setDeleteError(err instanceof ApiError ? err.message : "Error inesperado");
+    } finally {
+      setDeleting(null);
+    }
+  }
+
   function handleLogout() {
     signOut();
     navigate("/login");
+  }
+
+  async function handleMove(entry: FileEntry) {
+    const from = joinPath(path, entry.name);
+    const input = window.prompt(
+      "Nueva ruta (absoluta, incluyendo el nombre):",
+      from,
+    );
+    if (input === null) {
+      return;
+    }
+    const to = input.trim();
+    if (!to || to === from) {
+      return;
+    }
+    if (!to.startsWith("/")) {
+      setMoveError("La ruta de destino debe ser absoluta (empezar con «/»).");
+      return;
+    }
+
+    setMoving(from);
+    setMoveError(null);
+    try {
+      await moveEntry(from, to);
+      await load(path);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      setMoveError(err instanceof ApiError ? err.message : "Error inesperado");
+    } finally {
+      setMoving(null);
+    }
   }
 
   return (
@@ -269,6 +359,8 @@ export default function FilesPage() {
 
           <div className="card">
             {error && <div className="error">{error}</div>}
+            {deleteError && <div className="error">{deleteError}</div>}
+            {moveError && <div className="error">{moveError}</div>}
 
             {!error && entries.length === 0 && !loading && (
               <div className="empty">Esta carpeta está vacía.</div>
@@ -307,15 +399,37 @@ export default function FilesPage() {
                         <td>{isDir ? "—" : formatSize(entry.size)}</td>
                         <td>{formatDate(entry.modified_at)}</td>
                         <td>
-                          {!isDir && (
+                          <div className="actions">
+                            {!isDir && (
+                              <button
+                                type="button"
+                                className="action-btn"
+                                onClick={() => setPreview(entry)}
+                              >
+                                Abrir
+                              </button>
+                            )}
                             <button
                               type="button"
-                              className="link"
-                              onClick={() => setPreview(entry)}
+                              className="action-btn"
+                              onClick={() => handleMove(entry)}
+                              disabled={moving === joinPath(path, entry.name)}
                             >
-                              Abrir
+                              {moving === joinPath(path, entry.name)
+                                ? "Moviendo…"
+                                : "Renombrar/Mover"}
                             </button>
-                          )}
+                            <button
+                              type="button"
+                              className="action-btn danger"
+                              onClick={() => handleDelete(entry)}
+                              disabled={deleting === joinPath(path, entry.name)}
+                            >
+                              {deleting === joinPath(path, entry.name)
+                                ? "Eliminando…"
+                                : "Eliminar"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

@@ -125,6 +125,27 @@ export function createDir(path: string): Promise<CreateDirResult> {
   });
 }
 
+/// Deletes a file or directory from the user's namespace. `recursive` must be
+/// true to remove a non-empty directory; otherwise the gateway returns 409.
+/// The gateway answers 204 on success, so there is no response body.
+export function removeEntry(path: string, recursive = false): Promise<void> {
+  const query = new URLSearchParams({ path, recursive: String(recursive) });
+  return request<void>(`/api/v1/files?${query.toString()}`, {
+    method: "DELETE",
+  });
+}
+
+/// Moves or renames an entry. `from` is the current absolute path, `to` is the
+/// full destination path including the new name, so this covers both renaming
+/// in place and moving across directories. The gateway answers 204 on success.
+export function moveEntry(from: string, to: string): Promise<void> {
+  return request<void>("/api/v1/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to }),
+  });
+}
+
 export interface UploadResult {
   path: string;
   inode_id: string;

@@ -8,6 +8,7 @@ use crate::pb::{
 	PathRequest,
 	RegisterRequest,
 	RegisterResponse,
+	RemoveRequest,
 	AbortUploadRequest,
 	BlockAssignment,
 	CommitUploadRequest,
@@ -16,6 +17,7 @@ use crate::pb::{
 	FileInfo,
 	Lease,
 	LeaseRequest,
+	MoveRequest,
 	ReadPlan,
 	ReadPlanRequest,
 	ReassignBlockRequest,
@@ -110,6 +112,38 @@ impl MasterClient {
 	) -> Result<Empty, Status> {
 		let mut client = self.client.clone();
 		let response = client.mkdir(PathRequest { user_id, path }).await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn remove(
+		&self,
+		user_id: String,
+		path: String,
+		recursive: bool,
+	) -> Result<Empty, Status> {
+		let mut client = self.client.clone();
+		let response = client
+			.remove(RemoveRequest {
+				user_id,
+				path,
+				recursive,
+			})
+			.await?;
+
+		Ok(response.into_inner())
+	}
+
+	pub async fn move_entry(
+		&self,
+		user_id: String,
+		from: String,
+		to: String,
+	) -> Result<Empty, Status> {
+		let mut client = self.client.clone();
+		let response = client
+			.r#move(MoveRequest { user_id, from, to })
+			.await?;
 
 		Ok(response.into_inner())
 	}

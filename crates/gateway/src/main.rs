@@ -1,6 +1,8 @@
 mod auth;
+mod delete;
 mod download;
 mod grpc;
+mod r#move;
 mod read;
 mod router;
 mod state;
