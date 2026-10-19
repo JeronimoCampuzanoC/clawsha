@@ -79,8 +79,9 @@ resource "aws_autoscaling_group" "workers" {
 # Two alarms add one worker each: the cluster is filling up, or the workers
 # are busy. There is no scale-in on purpose: a removed worker takes its blocks
 # with it and the master would have to copy them again.
-# The leader publishes DFSha/ClusterUsedPercent (master health module).
-# Until it does, the alarm stays in INSUFFICIENT_DATA and nothing happens.
+# The leader publishes DFSha/ClusterUsedPercent every minute
+# (crates/master/src/metrics.rs, enabled by MASTER_CLOUDWATCH_NAMESPACE in
+# scripts/master.sh.tftpl).
 
 resource "aws_autoscaling_policy" "add_worker" {
   name                   = "${var.name}-add-worker"
