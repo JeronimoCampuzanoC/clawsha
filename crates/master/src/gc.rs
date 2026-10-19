@@ -23,13 +23,20 @@
 //! was deleted. Every DynamoDB write goes through the fenced layer, and the
 //! DeleteBlock orders carry the leader's fencing, so a deposed leader cannot
 //! delete anything.
+//!
+//! Safety valve: rows in `blocks` only disappear when this GC drops them
+//! (and one at a time on ReassignBlock), so the GC knows which orphans it
+//! explains. A crowd of orphans it does not explain means the metadata is
+//! wrong, not the workers: empty tables, a wrong MASTER_TABLE_PREFIX, a
+//! DynamoDB Local that restarted in memory. Then it deletes none of them and
+//! logs an error, instead of wiping every disk in the cluster.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::time::MissedTickBehavior;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::cluster::{ClusterState, WorkerInfo, WorkerState};
 use crate::db::versions::{VersionStatus, version_id};
@@ -51,6 +58,12 @@ pub const PENDING_TIMEOUT_MS: u64 = 60 * 60_000;
 pub const ORPHAN_GRACE_MS: u64 = 60_000;
 /// Versions handled per pass and status, so one pass stays short.
 const VERSIONS_PER_PASS: i32 = 100;
+/// Unexplained orphans tolerated before suspecting the metadata: at least
+/// this many and more than half of the blocks the workers hold.
+pub const SUSPICIOUS_ORPHANS: usize = 10;
+/// How long the GC remembers the blocks whose rows it dropped, so a worker
+/// that was away and comes back with them still gets them deleted.
+const DROPPED_MEMORY_MS: u64 = 60 * 60_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
@@ -67,11 +80,20 @@ pub struct Deletion {
     pub reason: Reason,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Plan {
+    pub deletions: Vec<Deletion>,
+    /// Orphans past their grace that were not deleted because there are too
+    /// many unexplained ones (see the safety valve above).
+    pub held_back: usize,
+}
+
 /// Decides which copies to delete. Pure (no network, no clock) so the rules
 /// can be tested on their own.
 ///
 /// - `holders`: every block the leader knows, with its non-dead holders.
 /// - `referenced`: block ids some version points to.
+/// - `explained`: block ids whose rows this GC dropped itself.
 /// - `orphan_since`: when each block first looked orphan; updated here.
 ///
 /// Only alive workers get orders. A block with a suspect holder is never
@@ -79,14 +101,22 @@ pub struct Deletion {
 pub fn plan_deletions(
     holders: Vec<(String, Vec<(WorkerInfo, WorkerState)>)>,
     referenced: &HashSet<String>,
+    explained: &HashSet<String>,
     orphan_since: &mut HashMap<String, u64>,
     replication: usize,
     now_ms: u64,
-) -> Vec<Deletion> {
+) -> Plan {
     let known: HashSet<&str> = holders.iter().map(|(b, _)| b.as_str()).collect();
     orphan_since.retain(|b, _| known.contains(b.as_str()) && !referenced.contains(b));
 
-    let mut deletions = Vec::new();
+    let unexplained = holders
+        .iter()
+        .filter(|(b, _)| !referenced.contains(b) && !explained.contains(b))
+        .count();
+    let suspicious = unexplained >= SUSPICIOUS_ORPHANS && unexplained * 2 > holders.len();
+
+    let mut plan = Plan::default();
+    let deletions = &mut plan.deletions;
     for (block_id, live) in &holders {
         let alive: Vec<&WorkerInfo> = live
             .iter()
@@ -96,7 +126,12 @@ pub fn plan_deletions(
 
         if !referenced.contains(block_id) {
             let since = *orphan_since.entry(block_id.clone()).or_insert(now_ms);
-            if now_ms.saturating_sub(since) >= ORPHAN_GRACE_MS {
+            if now_ms.saturating_sub(since) < ORPHAN_GRACE_MS {
+                continue;
+            }
+            if suspicious && !explained.contains(block_id) {
+                plan.held_back += 1;
+            } else {
                 deletions.extend(alive.iter().map(|w| Deletion {
                     block_id: block_id.clone(),
                     worker: (*w).clone(),
@@ -117,7 +152,7 @@ pub fn plan_deletions(
         }
     }
     deletions.sort_by(|a, b| (&a.block_id, &a.worker.id).cmp(&(&b.block_id, &b.worker.id)));
-    deletions
+    plan
 }
 
 /// The `count` copies to drop: always from the AZ with the most copies, so
@@ -154,6 +189,7 @@ pub struct GcReport {
     pub orphan_copies_deleted: usize,
     pub extra_copies_deleted: usize,
     pub failed_deletes: usize,
+    pub orphans_held_back: usize,
 }
 
 impl GcReport {
@@ -168,6 +204,8 @@ pub struct Collector<C> {
     client: C,
     replication: usize,
     orphan_since: Mutex<HashMap<String, u64>>,
+    /// block_id -> when this GC dropped the row that pointed to it.
+    dropped: Mutex<HashMap<String, u64>>,
 }
 
 impl<C: WorkerClient> Collector<C> {
@@ -178,6 +216,7 @@ impl<C: WorkerClient> Collector<C> {
             client,
             replication,
             orphan_since: Mutex::new(HashMap::new()),
+            dropped: Mutex::new(HashMap::new()),
         }
     }
 
@@ -193,18 +232,36 @@ impl<C: WorkerClient> Collector<C> {
         // see the row, no version points to the block any more.
         let holders = self.cluster.holders(now_ms);
         let referenced = self.db.referenced_block_ids().await?;
-        let deletions = {
+        let plan = {
+            let known: HashSet<&str> = holders.iter().map(|(b, _)| b.as_str()).collect();
+            let mut dropped = self.dropped.lock().unwrap();
+            dropped.retain(|b, at| {
+                known.contains(b.as_str()) || now_ms.saturating_sub(*at) < DROPPED_MEMORY_MS
+            });
+            let explained: HashSet<String> = dropped.keys().cloned().collect();
+            drop(dropped);
+
             let mut orphan_since = self.orphan_since.lock().unwrap();
             plan_deletions(
                 holders,
                 &referenced,
+                &explained,
                 &mut orphan_since,
                 self.replication,
                 now_ms,
             )
         };
+        report.orphans_held_back = plan.held_back;
+        if plan.held_back > 0 {
+            error!(
+                held_back = plan.held_back,
+                "most blocks on the workers belong to no file and the GC did not free them: \
+                 the metadata looks wrong (empty tables? wrong MASTER_TABLE_PREFIX?). \
+                 Not deleting them; fix the metadata or clean the workers by hand"
+            );
+        }
 
-        for d in deletions {
+        for d in plan.deletions {
             let request = pb::DeleteBlockRequest {
                 block_id: d.block_id.clone(),
                 fencing: fence.fencing,
@@ -266,11 +323,16 @@ impl<C: WorkerClient> Collector<C> {
             .await?;
         let count = expired.len();
         for v in expired {
+            let vid = version_id(&v.inode_id, v.version_no);
+            // Remember what we orphan, so the sweep knows these are ours.
+            let blocks = self.db.list_blocks(&vid).await?;
+            self.dropped
+                .lock()
+                .unwrap()
+                .extend(blocks.into_iter().map(|b| (b.block_id, now_ms)));
             // Rows first: if we stop halfway, the version is still OLD and
             // the next pass finishes the job.
-            self.db
-                .delete_blocks(fence, &version_id(&v.inode_id, v.version_no))
-                .await?;
+            self.db.delete_blocks(fence, &vid).await?;
             self.db
                 .delete_old_version(fence, &v.inode_id, v.version_no)
                 .await?;

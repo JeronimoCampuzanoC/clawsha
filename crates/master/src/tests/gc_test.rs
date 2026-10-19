@@ -6,7 +6,8 @@ use tonic::Status;
 use crate::cluster::{ClusterState, Heartbeat, WorkerInfo, WorkerState};
 use crate::db::versions::VersionStatus;
 use crate::gc::{
-    Collector, GcReport, OLD_GRACE_MS, ORPHAN_GRACE_MS, PENDING_TIMEOUT_MS, Reason, plan_deletions,
+    Collector, Deletion, GcReport, OLD_GRACE_MS, ORPHAN_GRACE_MS, PENDING_TIMEOUT_MS, Reason,
+    plan_deletions,
 };
 use crate::namespace::Namespace;
 use crate::pb;
@@ -44,6 +45,25 @@ fn ids(deletions: &[crate::gc::Deletion]) -> Vec<(&str, &str)> {
 
 // --- plan_deletions: the rules ------------------------------------------------
 
+/// The rules without the safety valve's bookkeeping: nothing explained.
+fn plan(
+    holders: Vec<(String, Vec<(WorkerInfo, WorkerState)>)>,
+    referenced: &HashSet<String>,
+    since: &mut HashMap<String, u64>,
+    replication: usize,
+    now: u64,
+) -> Vec<Deletion> {
+    plan_deletions(
+        holders,
+        referenced,
+        &HashSet::new(),
+        since,
+        replication,
+        now,
+    )
+    .deletions
+}
+
 #[test]
 fn an_orphan_is_deleted_only_after_the_grace_period() {
     let holders = vec![(
@@ -53,10 +73,10 @@ fn an_orphan_is_deleted_only_after_the_grace_period() {
     let referenced = HashSet::new();
     let mut since = HashMap::new();
 
-    let first = plan_deletions(holders.clone(), &referenced, &mut since, 2, 10 * S);
+    let first = plan(holders.clone(), &referenced, &mut since, 2, 10 * S);
     assert!(first.is_empty(), "first sighting only starts the clock");
 
-    let later = plan_deletions(
+    let later = plan(
         holders,
         &referenced,
         &mut since,
@@ -72,13 +92,13 @@ fn a_block_referenced_again_restarts_the_orphan_clock() {
     let holders = vec![("b1".to_string(), vec![alive(worker("w1", "a", 0))])];
     let mut since = HashMap::new();
 
-    plan_deletions(holders.clone(), &HashSet::new(), &mut since, 1, 0);
+    plan(holders.clone(), &HashSet::new(), &mut since, 1, 0);
     // A scan that sees the row again (it was a read race, not an orphan).
     let referenced = HashSet::from(["b1".to_string()]);
-    plan_deletions(holders.clone(), &referenced, &mut since, 1, 30 * S);
+    plan(holders.clone(), &referenced, &mut since, 1, 30 * S);
     assert!(since.is_empty());
 
-    let after = plan_deletions(holders, &HashSet::new(), &mut since, 1, ORPHAN_GRACE_MS);
+    let after = plan(holders, &HashSet::new(), &mut since, 1, ORPHAN_GRACE_MS);
     assert!(
         after.is_empty(),
         "the clock started over at the last sighting"
@@ -92,7 +112,7 @@ fn referenced_blocks_with_r_copies_are_left_alone() {
         vec![alive(worker("w1", "a", 0)), alive(worker("w2", "b", 0))],
     )];
     let referenced = HashSet::from(["b1".to_string()]);
-    let out = plan_deletions(holders, &referenced, &mut HashMap::new(), 2, 0);
+    let out = plan(holders, &referenced, &mut HashMap::new(), 2, 0);
     assert!(out.is_empty());
 }
 
@@ -108,7 +128,7 @@ fn an_extra_copy_is_dropped_from_the_az_that_has_two() {
         ],
     )];
     let referenced = HashSet::from(["b1".to_string()]);
-    let out = plan_deletions(holders, &referenced, &mut HashMap::new(), 2, 0);
+    let out = plan(holders, &referenced, &mut HashMap::new(), 2, 0);
     assert_eq!(
         ids(&out),
         vec![("b1", "a-full")],
@@ -128,7 +148,7 @@ fn no_trim_while_a_holder_is_suspect() {
         ],
     )];
     let referenced = HashSet::from(["b1".to_string()]);
-    let out = plan_deletions(holders, &referenced, &mut HashMap::new(), 2, 0);
+    let out = plan(holders, &referenced, &mut HashMap::new(), 2, 0);
     assert!(
         out.is_empty(),
         "w3 may die and the extra copy would be needed"
@@ -145,8 +165,82 @@ fn suspect_workers_get_no_delete_orders() {
         ],
     )];
     let mut since = HashMap::from([("gone".to_string(), 0)]);
-    let out = plan_deletions(holders, &HashSet::new(), &mut since, 2, ORPHAN_GRACE_MS);
+    let out = plan(holders, &HashSet::new(), &mut since, 2, ORPHAN_GRACE_MS);
     assert_eq!(ids(&out), vec![("gone", "w1")]);
+}
+
+/// `n` blocks, each on two alive workers, named prefix-0, prefix-1, ...
+fn blocks(prefix: &str, n: usize) -> Vec<(String, Vec<(WorkerInfo, WorkerState)>)> {
+    (0..n)
+        .map(|i| {
+            (
+                format!("{prefix}-{i}"),
+                vec![alive(worker("w1", "a", 0)), alive(worker("w2", "b", 0))],
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_crowd_of_unexplained_orphans_is_held_back() {
+    // The metadata vanished: every block on the workers looks orphan.
+    let holders = blocks("lost", 30);
+    let mut since: HashMap<String, u64> = holders.iter().map(|(b, _)| (b.clone(), 0)).collect();
+
+    let plan = plan_deletions(
+        holders,
+        &HashSet::new(),
+        &HashSet::new(),
+        &mut since,
+        2,
+        ORPHAN_GRACE_MS,
+    );
+    assert!(
+        plan.deletions.is_empty(),
+        "never wipe the cluster on bad metadata"
+    );
+    assert_eq!(plan.held_back, 30);
+}
+
+#[test]
+fn orphans_the_gc_made_itself_are_freed_even_if_they_are_most_blocks() {
+    // The user removed almost everything: the GC dropped those rows.
+    let mut holders = blocks("removed", 30);
+    holders.extend(blocks("kept", 2));
+    let referenced: HashSet<String> = (0..2).map(|i| format!("kept-{i}")).collect();
+    let explained: HashSet<String> = (0..30).map(|i| format!("removed-{i}")).collect();
+    let mut since: HashMap<String, u64> = explained.iter().map(|b| (b.clone(), 0)).collect();
+
+    let plan = plan_deletions(
+        holders,
+        &referenced,
+        &explained,
+        &mut since,
+        2,
+        ORPHAN_GRACE_MS,
+    );
+    assert_eq!(plan.held_back, 0);
+    assert_eq!(plan.deletions.len(), 60, "30 blocks x 2 copies");
+}
+
+#[test]
+fn a_few_unexplained_orphans_are_freed() {
+    // Reassigned blocks: a handful, among plenty of referenced ones.
+    let mut holders = blocks("reassigned", 3);
+    holders.extend(blocks("file", 20));
+    let referenced: HashSet<String> = (0..20).map(|i| format!("file-{i}")).collect();
+    let mut since: HashMap<String, u64> = (0..3).map(|i| (format!("reassigned-{i}"), 0)).collect();
+
+    let plan = plan_deletions(
+        holders,
+        &referenced,
+        &HashSet::new(),
+        &mut since,
+        2,
+        ORPHAN_GRACE_MS,
+    );
+    assert_eq!(plan.held_back, 0);
+    assert_eq!(plan.deletions.len(), 6);
 }
 
 // --- Collector: a pass against DynamoDB Local and fake workers ----------------
@@ -420,6 +514,25 @@ async fn blocks_of_a_live_upload_are_not_orphans() {
 
     r.pass(now + S).await;
     let report = r.pass(now + S + ORPHAN_GRACE_MS).await;
+    assert_eq!(report.orphan_copies_deleted, 0);
+    assert!(r.workers.deleted().is_empty());
+    r.t.cleanup().await;
+}
+
+#[tokio::test]
+async fn blocks_the_metadata_never_heard_of_are_not_wiped() {
+    let Some(r) = rig().await else { return };
+    let now = now_ms();
+    // Workers full of blocks, tables empty: the DynamoDB Local restart case.
+    for _ in 0..12 {
+        let id = uuid::Uuid::new_v4().to_string();
+        r.cluster.add_location(&id, "a1");
+        r.cluster.add_location(&id, "b1");
+    }
+
+    r.pass(now + S).await;
+    let report = r.pass(now + S + ORPHAN_GRACE_MS).await;
+    assert_eq!(report.orphans_held_back, 12);
     assert_eq!(report.orphan_copies_deleted, 0);
     assert!(r.workers.deleted().is_empty());
     r.t.cleanup().await;
