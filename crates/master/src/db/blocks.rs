@@ -3,6 +3,8 @@
 //! rewritten at CommitUpload with the hash the gateway computed. Where each
 //! block lives is NOT here: the leader keeps that in memory (see cluster.rs).
 
+use std::collections::HashSet;
+
 use aws_sdk_dynamodb::types::{Delete, Put, TransactWriteItem};
 
 use super::attr::{Item, b, get_b, get_n, get_s, n, s};
@@ -73,9 +75,37 @@ impl Db {
         Ok(found)
     }
 
-    /// Removes every row of a version. Not called by the master itself: this
-    /// is for the GC (B), once the workers have dropped the blocks.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Every block id some version still points to, PENDING ones included
+    /// (their rows are written before any worker gets the data). A strongly
+    /// consistent scan: the GC deletes from workers whatever is not here, so
+    /// a stale read could lose data.
+    pub async fn referenced_block_ids(&self) -> Result<HashSet<String>, MasterError> {
+        let mut found = HashSet::new();
+        let mut start_key = None;
+        loop {
+            let out = self
+                .client
+                .scan()
+                .table_name(self.tables.blocks())
+                .projection_expression("block_id")
+                .consistent_read(true)
+                .set_exclusive_start_key(start_key)
+                .send()
+                .await
+                .map_err(sdk_error)?;
+            for item in out.items() {
+                found.insert(get_s(item, "block_id")?);
+            }
+            start_key = out.last_evaluated_key().cloned();
+            if start_key.is_none() {
+                break;
+            }
+        }
+        Ok(found)
+    }
+
+    /// Removes every row of a version. For the GC, once the version is OLD
+    /// and past its grace period.
     pub async fn delete_blocks(&self, fence: &Fence, version_id: &str) -> Result<(), MasterError> {
         let existing = self.list_blocks(version_id).await?;
         for chunk in existing.chunks(MAX_ITEMS_PER_WRITE) {

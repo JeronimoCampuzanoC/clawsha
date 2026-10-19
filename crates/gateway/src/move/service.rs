@@ -8,21 +8,21 @@ use crate::grpc::MasterClient;
 /// renaming in place and moving across directories.
 #[derive(Clone)]
 pub struct MoveService {
-	master: MasterClient,
+    master: MasterClient,
 }
 
 impl MoveService {
-	pub fn new(master: MasterClient) -> Self {
-		Self { master }
-	}
+    pub fn new(master: MasterClient) -> Self {
+        Self { master }
+    }
 
-	pub async fn move_entry(
-		&self,
-		user_id: String,
-		from: String,
-		to: String,
-	) -> Result<(), Status> {
-		self.master.move_entry(user_id, from, to).await?;
-		Ok(())
-	}
+    pub async fn move_entry(
+        &self,
+        user_id: String,
+        from: String,
+        to: String,
+    ) -> Result<(), Status> {
+        self.master.move_entry(user_id, from, to).await?;
+        Ok(())
+    }
 }

@@ -376,3 +376,79 @@ th {
 }
 
 
+
+/* ---- Cluster dashboard -------------------------------------------------- */
+
+.header-nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.cluster {
+  max-width: 1100px;
+  margin: 1.25rem auto;
+  padding: 0 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.cluster .muted {
+  color: #6b7190;
+  font-size: 0.8rem;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stat-label {
+  color: #6b7190;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.stat-ok {
+  border-left: 4px solid #2e8b57;
+}
+
+.stat-alert {
+  border-left: 4px solid #c0392b;
+}
+
+.stat-alert .stat-value {
+  color: #c0392b;
+}
+
+.badge.state-alive {
+  background: #e3f4ea;
+  color: #1e6b41;
+}
+
+.badge.state-suspect {
+  background: #fdf3dc;
+  color: #8a5a00;
+}
+
+.badge.state-dead {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+.usage {
+  min-width: 160px;
+}

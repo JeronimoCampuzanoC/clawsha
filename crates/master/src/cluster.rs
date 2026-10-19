@@ -230,6 +230,25 @@ impl ClusterState {
         self.inner.lock().unwrap().locations.len() as u64
     }
 
+    /// Every known block with the workers that hold it and are not dead,
+    /// each with its state. For the GC: what to delete and from where.
+    pub fn holders(&self, now_ms: u64) -> Vec<(String, Vec<(WorkerInfo, WorkerState)>)> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .locations
+            .iter()
+            .map(|(block, ids)| {
+                let live = ids
+                    .iter()
+                    .filter_map(|id| inner.workers.get(id))
+                    .map(|w| (w.clone(), w.state(now_ms)))
+                    .filter(|(_, state)| *state != WorkerState::Dead)
+                    .collect();
+                (block.clone(), live)
+            })
+            .collect()
+    }
+
     /// Blocks with fewer than `target` copies on workers that are not dead.
     /// A copy on a dead worker does not count: that is exactly the copy the
     /// health module has to replace.

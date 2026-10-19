@@ -6,8 +6,9 @@ use rand::rngs::StdRng;
 use tonic::Status;
 
 use crate::cluster::{ClusterState, Heartbeat, WorkerInfo};
-use crate::health::{Healer, MAX_STREAMS_PER_WORKER, REPAIR_GRACE_MS, WorkerClient, plan_repairs};
+use crate::health::{Healer, MAX_STREAMS_PER_WORKER, REPAIR_GRACE_MS, plan_repairs};
 use crate::pb;
+use crate::workers::WorkerClient;
 
 const S: u64 = 1_000; // one second, in ms
 const FENCING: u64 = 7;
@@ -205,6 +206,14 @@ impl WorkerClient for FakeWorkers {
             .unwrap()
             .push((worker_addr.to_string(), request));
         self.answers.lock().unwrap().pop_front().unwrap_or(Ok(16))
+    }
+
+    async fn delete(
+        &self,
+        _worker_addr: &str,
+        _request: pb::DeleteBlockRequest,
+    ) -> Result<u64, Status> {
+        unreachable!("the health module never deletes")
     }
 }
 

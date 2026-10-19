@@ -4,10 +4,12 @@ mod cluster;
 mod config;
 mod db;
 mod error;
+mod gc;
 mod grpc;
 mod health;
 mod http;
 mod leader;
+mod metrics;
 mod namespace;
 mod path;
 mod pb;
@@ -17,6 +19,7 @@ mod read_plan;
 mod tests;
 mod time;
 mod upload;
+mod workers;
 
 use std::sync::Arc;
 
@@ -65,11 +68,28 @@ async fn main() -> anyhow::Result<()> {
     // Re-replication: only acts while this process leads.
     let healer = Arc::new(health::Healer::new(
         app.cluster.clone(),
-        health::GrpcWorkers,
+        workers::GrpcWorkers,
         app.replication,
         app.block_size,
     ));
     tokio::spawn(health::run(healer, app.leadership.clone()));
+
+    // GC: frees blocks no file points to any more. Also leader-only.
+    let collector = Arc::new(gc::Collector::new(
+        app.db.clone(),
+        app.cluster.clone(),
+        workers::GrpcWorkers,
+        app.replication,
+    ));
+    tokio::spawn(gc::run(collector, app.leadership.clone()));
+
+    if !config.cloudwatch_namespace.is_empty() {
+        tokio::spawn(metrics::run(
+            app.cluster.clone(),
+            app.leadership.clone(),
+            config.cloudwatch_namespace.clone(),
+        ));
+    }
 
     let grpc = TcpListener::bind(("0.0.0.0", config.port))
         .await
