@@ -22,6 +22,9 @@ services:
   worker-b:
     image: dfsha-worker:local
 
+  worker-c:
+    image: dfsha-worker:local
+
   gateway:
     build:
       context: ..

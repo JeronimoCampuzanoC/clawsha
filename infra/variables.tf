@@ -80,9 +80,9 @@ variable "worker_instance_type" {
 }
 
 variable "worker_min" {
-  description = "Two per AZ, as in the diagram."
+  description = "R + 1: one spare so a dead worker's blocks can be re-replicated right away. Two AZs get 2 + 1; if the lone worker of an AZ dies, its copies land in the other AZ until the ASG replaces it."
   type        = number
-  default     = 4
+  default     = 3
 }
 
 variable "worker_max" {

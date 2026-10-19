@@ -503,7 +503,7 @@ impl MasterService for MasterApi {
             fencing: leadership.fencing(),
             safe_mode: leadership.safe_mode(now),
             workers,
-            under_replicated_blocks: self.app.cluster.under_replicated(self.app.replication),
+            under_replicated_blocks: self.app.cluster.under_replicated(self.app.replication, now),
             total_blocks: self.app.cluster.total_blocks(),
         }))
     }

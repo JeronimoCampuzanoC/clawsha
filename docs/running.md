@@ -158,11 +158,13 @@ docker compose -f deploy/compose.local.yml pull
 docker compose -f deploy/compose.local.yml up -d
 ```
 
-El archivo levanta `dynamodb`, dos masters, dos workers y un gateway:
+El archivo levanta `dynamodb`, dos masters, tres workers y un gateway. El
+tercer worker existe para la re-replicación: con R = 2 y solo dos workers, si
+uno cae no hay a dónde copiar sus bloques.
 
 | Servicio | Quién | Qué necesita |
 | --- | --- | --- |
-| `worker-a`, `worker-b` | B | `WORKER_ID`, `WORKER_AZ`, `WORKER_DATA_DIR` con un volumen, `WORKER_QUOTA_BYTES` y la dirección del master |
+| `worker-a`, `worker-b`, `worker-c` | B | `WORKER_ID`, `WORKER_AZ`, `WORKER_DATA_DIR` con un volumen, `WORKER_QUOTA_BYTES` y la dirección del master |
 | `gateway` | C | Puerto 3001 en local, secreto del JWT y dirección del master |
 
 Flujo esperado cuando todo esté: el navegador entra al gateway, el gateway
