@@ -1,0 +1,6 @@
+f0 size=0 blocks=0 up=[201 0.080124] down=[200 0.007952] sha=OK
+f1 size=1 blocks=1 up=[201 0.081709] down=[200 0.008802] sha=OK
+f16m size=16777216 blocks=1 up=[201 0.218405] down=[200 0.100441] sha=OK
+f16m1 size=16777217 blocks=2 up=[201 0.211013] down=[200 0.150872] sha=OK
+f100m size=104857600 blocks=7 up=[201 0.948910] down=[200 0.620124] sha=OK
+f1g size=1073741824 blocks=64 up=[201 9.348576] down=[200 5.777352] sha=OK

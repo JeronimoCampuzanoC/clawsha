@@ -1,0 +1,19 @@
+# D1: corrupt the worker-b copy of a 16 MiB block (cbbd78b7-...), first MiB zeroed
+replicas: worker-b /data/blocks/cb/bd/cbbd78b7-76b8-43cc-b294-760b9dedc813, worker-c (same path)
+download 1: 200 0.276894 sha=OK
+download 2: 200 0.263184 sha=OK
+download 3: 200 0.248472 sha=OK
+t=+2.0s under_rep=0 quarantined_on_b=0 b_copy=cf56cdc91485
+t=+5.3s under_rep=0 quarantined_on_b=0 b_copy=cf56cdc91485
+t=+8.7s under_rep=0 quarantined_on_b=0 b_copy=cf56cdc91485
+t=+12.9s under_rep=0 quarantined_on_b=0 b_copy=cf56cdc91485
+t=+16.2s under_rep=1 quarantined_on_b=1 b_copy=none
+t=+19.5s under_rep=1 quarantined_on_b=1 b_copy=none
+t=+22.8s under_rep=1 quarantined_on_b=1 b_copy=none
+t=+27.1s under_rep=1 quarantined_on_b=1 b_copy=none
+t=+30.6s under_rep=0 quarantined_on_b=1 b_copy=2792da3bb1a9
+repaired copy on worker-b: 2792da3bb1a9f049   healthy copy on worker-c: 2792da3bb1a9f049
+--- logs
+worker-b  04:40:16.699586Z WARN worker::scrubber: corrupt block moved to quarantine block_id=cbbd78b7-76b8-43cc-b294-760b9dedc813
+master-b  04:40:17.882727Z WARN master::grpc::master: replica reported corrupt block=cbbd78b7-76b8-43cc-b294-760b9dedc813 worker=worker-b
+master-b  04:40:32.496325Z INFO master::health: block re-replicated block_id=cbbd78b7-76b8-43cc-b294-760b9dedc813 source=worker-c target=worker-b sent_bytes=16777216

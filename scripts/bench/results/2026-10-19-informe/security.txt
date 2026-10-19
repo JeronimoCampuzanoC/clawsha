@@ -1,0 +1,17 @@
+valid token: 200
+no token: 401
+tampered signature: 401
+expired 1 s ago (correct secret): 401
+control: forged the same way, valid 1 h (correct secret): 200
+forged with wrong secret: 401
+alg=none token: 401
+unknown route: 404
+path traversal upload /../../etc/x: 400 0.002518 body=
+  ls /: []
+  worker-a files outside blocks/tmp/quarantine: 0
+  worker-b files outside blocks/tmp/quarantine: 0
+  worker-c files outside blocks/tmp/quarantine: 0
+HTML with disposition=inline -> headers:
+content-type: text/html; charset=utf-8
+content-disposition: attachment; filename="x.html"
+x-content-type-options: nosniff

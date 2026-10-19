@@ -1,0 +1,5 @@
+# Generated test files (~1.4 GiB) and downloads
+data/
+tmp/
+# Scratch results of ad-hoc runs; dated campaign folders are kept
+results/latest/

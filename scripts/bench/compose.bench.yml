@@ -1,0 +1,122 @@
+# Cluster for the test campaign (report, section 7). Same topology as
+# deploy/compose.local.yml, built from this checkout, under its own project
+# name and host ports so it never touches the dev stack (3001/8081/8082).
+#
+#   AZ a: master-a, worker-a, worker-c      AZ b: master-b, worker-b
+#   worker-d (AZ b) only starts with --profile extra (placement test).
+#
+# Knobs (environment): BLOCK_SIZE (bytes, default 16 MiB), REPLICATION
+# (default 2), QUOTA (bytes per worker, default 2 GiB), SCRUB_SECS (default 30).
+# Normally driven by stack.sh, not by hand.
+name: clawsha-bench
+
+x-master-env: &master-env
+  MASTER_DYNAMODB_ENDPOINT: http://dynamodb:8000
+  MASTER_CREATE_TABLES: "true"
+  MASTER_BLOCK_SIZE: "${BLOCK_SIZE:-16777216}"
+  MASTER_REPLICATION: "${REPLICATION:-2}"
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: local
+  AWS_REGION: us-east-1
+  RUST_LOG: info
+
+x-worker: &worker
+  image: dfsha-worker:local
+  depends_on:
+    master-lb:
+      condition: service_started
+
+x-worker-env: &worker-env
+  WORKER_PORT: "50052"
+  MASTER_ADDR: http://master-lb:50051
+  WORKER_DATA_DIR: /data
+  WORKER_QUOTA_BYTES: "${QUOTA:-2147483648}"
+  # Short so the corruption tests finish quickly; production default is 600.
+  WORKER_SCRUB_INTERVAL_SECS: "${SCRUB_SECS:-30}"
+  RUST_LOG: info
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000 >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  master-a:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/master.Dockerfile
+    image: dfsha-master:local
+    environment:
+      <<: *master-env
+      MASTER_ID: master-a
+      MASTER_AZ: a
+      MASTER_ADVERTISE_ADDR: master-a:50051
+    ports: ["8181:8080"]
+    depends_on: { dynamodb: { condition: service_healthy } }
+
+  master-b:
+    image: dfsha-master:local
+    environment:
+      <<: *master-env
+      MASTER_ID: master-b
+      MASTER_AZ: b
+      MASTER_ADVERTISE_ADDR: master-b:50051
+    ports: ["8182:8080"]
+    depends_on: { dynamodb: { condition: service_healthy } }
+
+  # Stand-in for the internal NLB: sends gRPC to whoever answers 200 on
+  # /health/leader.
+  master-lb:
+    image: haproxy:lts-alpine
+    volumes:
+      - ../../deploy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      master-a: { condition: service_healthy }
+      master-b: { condition: service_healthy }
+
+  worker-a:
+    <<: *worker
+    build:
+      context: ../..
+      dockerfile: deploy/docker/worker.Dockerfile
+    environment: { <<: *worker-env, WORKER_ID: worker-a, WORKER_AZ: a, WORKER_ADVERTISE_ADDR: "worker-a:50052" }
+    volumes: [worker-a-data:/data]
+  worker-b:
+    <<: *worker
+    environment: { <<: *worker-env, WORKER_ID: worker-b, WORKER_AZ: b, WORKER_ADVERTISE_ADDR: "worker-b:50052" }
+    volumes: [worker-b-data:/data]
+  worker-c:
+    <<: *worker
+    environment: { <<: *worker-env, WORKER_ID: worker-c, WORKER_AZ: a, WORKER_ADVERTISE_ADDR: "worker-c:50052" }
+    volumes: [worker-c-data:/data]
+  worker-d:
+    <<: *worker
+    profiles: [extra]
+    environment: { <<: *worker-env, WORKER_ID: worker-d, WORKER_AZ: b, WORKER_ADVERTISE_ADDR: "worker-d:50052" }
+    volumes: [worker-d-data:/data]
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/gateway.Dockerfile
+    image: dfsha-gateway:local
+    environment:
+      MASTER_ADDRESS: http://master-lb:50051
+      # The security tests forge tokens with this secret (security.sh).
+      JWT_SECRET: bench-secret
+      GATEWAY_ENCRYPTION_KEY: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+      GATEWAY_ADDR: 0.0.0.0:3000
+      RUST_LOG: info
+    ports: ["3101:3000"]
+    restart: on-failure
+    depends_on: { master-lb: { condition: service_started } }
+
+volumes:
+  worker-a-data:
+  worker-b-data:
+  worker-c-data:
+  worker-d-data:

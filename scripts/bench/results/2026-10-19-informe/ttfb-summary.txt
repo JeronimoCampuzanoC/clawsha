@@ -1,0 +1,2 @@
+/lat1 n=30 p50=7.0ms p95=11.4ms max=21.4ms
+/lat16 n=30 p50=29.7ms p95=38.6ms max=42.8ms

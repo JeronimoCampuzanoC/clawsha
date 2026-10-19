@@ -1,0 +1,22 @@
+# D2: corrupt the worker-b copy (first 64 KiB) of all 7 blocks of a 100 MiB file, download at once
+blocks with a copy on worker-b: 7
+download: 200 1.511520 sha=OK (corrupt->download done in 2.6 s)
+--- read fallback (worker logs)
+worker-b 04:41:44.666094Z WARN request failed rpc=GetBlock block_id=12918210-2758-4b97-a172-7773304d1d03 code=DataLoss sha256 mismatch
+worker-a 04:41:44.671952Z INFO GetBlock requested block_id=12918210-2758-4b97-a172-7773304d1d03
+worker-b 04:41:45.073040Z WARN request failed rpc=GetBlock block_id=0db7197b-0de6-43df-bf5f-a4cc502c3e0b code=DataLoss sha256 mismatch
+worker-a 04:41:45.076770Z INFO GetBlock requested block_id=0db7197b-0de6-43df-bf5f-a4cc502c3e0b
+(no 'replica reported corrupt' from the gateway for these: it only reports its own hash mismatches)
+--- scrubber on worker-b
+04:41:51.416207Z scrub pass finished checked=87 quarantined=3
+04:42:22.482899Z scrub pass finished checked=89 quarantined=4
+04:42:44.154244Z scrub pass finished checked=93 quarantined=0
+--- under-replicated blocks after the corruption
+t=+5.1s under_rep=1
+t=+8.1s under_rep=3
+t=+11.2s under_rep=3
+t=+14.3s under_rep=2
+t=+17.4s under_rep=2
+t=+20.5s under_rep=0
+last re-replication: 04:42:42.297874Z (all 7 copies back on worker-b)
+download after the repair: 200 0.873680 sha=OK

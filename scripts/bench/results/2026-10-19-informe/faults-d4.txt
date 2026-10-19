@@ -1,0 +1,21 @@
+# D4: kill master-b (leader) and worker-b, i.e. all of AZ b
+leader before: a=standby b=leader fencing=1
+metadata (ls) back at t=+15.8s; master-a: leader fencing=2
+first successful download at t=+22.6s
+  f1: 200 0.005398 sha=OK
+  f16m: 200 0.115856 sha=OK
+  f16m1: 200 0.099157 sha=OK
+  f100m: 200 0.464653 sha=OK
+  f1g: 200 4.627687 sha=OK
+  race.bin: 200 0.502509 sha=OK
+  corrupt.bin: 200 0.109865 sha=OK
+  fallback.bin: 200 0.456311 sha=OK
+status: leader=master-a fencing=2 safe_mode=true total_blocks=92 under_replicated_blocks=92
+upload during AZ outage: 201 0.232783
+--- repair inside AZ a (t from the end of the reads)
+t=+0.0s safe=false under_rep=92 worker-a:49/alive worker-c:47/alive
+t=+8.2s safe=false under_rep=17 worker-a:86/alive worker-c:85/alive
+t=+10.3s safe=false under_rep=0 worker-a:94/alive worker-c:94/alive
+--- AZ b restored: master-b standby; GC trims the extra copies in AZ a
+t=+31.5s under_rep=0 worker-a:80 worker-b:92 worker-c:94
+t=+36.6s under_rep=0 worker-a:2 worker-b:92 worker-c:94

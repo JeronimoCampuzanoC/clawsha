@@ -37,6 +37,7 @@ dfsha/
 │   ├── modules/           # network, security, data, control, workers, edge
 │   └── scripts/           # user-data de cada rol (instala Docker y arranca el contenedor)
 ├── scripts/dev/           # DynamoDB Local, pruebas del master, failover local
+├── scripts/bench/         # pruebas de sistema y benchmarks del informe (ver su README)
 ├── docs/                  # running.md (guía completa) y master.md (diseño del master)
 └── .github/workflows/     # CI: build, clippy y pruebas; publica las imágenes en Docker Hub
 ```
@@ -225,7 +226,7 @@ curl -s "$API/files?path=/docs/informe.pdf&disposition=attachment" \
 - **Modo seguro fijo.** Después de un failover, el nuevo líder espera 30 s antes de re-replicar, aunque los workers ya hayan reportado.
 - **Los workers solo crecen.** El ASG agrega workers según el uso, pero nunca los retira (no hay drenado de bloques).
 - **Learner Lab.** Las credenciales cambian en cada sesión, el certificado HTTPS es autofirmado y el ASG no puede pasar de 6 instancias.
-- **Faltan los scripts de caos y los benchmarks automatizados.** Hoy las pruebas de falla se hacen a mano.
+- **Las pruebas de sistema corren en local.** `scripts/bench/` automatiza las fallas y los benchmarks sobre Docker en una sola máquina; falta correrlos contra el despliegue en AWS, con los límites de red reales.
 
 ### Trabajo futuro: Clawsha Home
 

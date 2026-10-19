@@ -1,0 +1,15 @@
+# D3: stop worker-c (46 blocks), then start it again
+before: worker-a/a:47 worker-b/b:93 worker-c/a:46, under_replicated=0
+t=+0.5s state_c=alive under_rep=0
+t=+9.8s state_c=suspect under_rep=0
+t=+30.5s state_c=dead under_rep=46
+t=+46.2s state_c=dead under_rep=6
+t=+47.2s state_c=dead under_rep=0
+download 1 GiB during outage (t=+5.9s end): 200 5.421956 sha=OK
+after: worker-a/a:93 worker-b/b:93 worker-c/a:46 dead, under_replicated=0
+download after repair: 200 0.569615 sha=OK
+--- worker-c back
+t=+1.4s worker-a:93/alive worker-b:93/alive worker-c:46/alive
+t=+16.7s worker-a:48/alive worker-b:93/alive worker-c:46/alive
+t=+47.1s worker-a:47/alive worker-b:92/alive worker-c:45/alive
+master-b 04:45:32Z gc pass report: extra_copies_deleted: 45
