@@ -1,10 +1,11 @@
 # Copy to terraform.tfvars (ignored by git) and fill in.
-master_image = "ghcr.io/<org>/dfsha-master:latest"
-worker_image = "ghcr.io/<org>/dfsha-worker:latest"
+# CI publishes these to Docker Hub on every push to main.
+master_image = "<dockerhub-user>/clawsha-master:latest"
+worker_image = "<dockerhub-user>/clawsha-worker:latest"
 
 # Leave both empty until the images exist: no gateways, no public NLB.
 gateway_image  = ""
-frontend_image = "" # "ghcr.io/<org>/dfsha-frontend:latest"
+frontend_image = "" # "<dockerhub-user>/clawsha-frontend:latest"
 
 # Uncomment to use one NAT instead of two while developing.
 # single_nat_gateway = true
