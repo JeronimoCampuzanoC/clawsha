@@ -8,21 +8,21 @@ use crate::grpc::MasterClient;
 /// answers FAILED_PRECONDITION (409).
 #[derive(Clone)]
 pub struct DeleteService {
-	master: MasterClient,
+    master: MasterClient,
 }
 
 impl DeleteService {
-	pub fn new(master: MasterClient) -> Self {
-		Self { master }
-	}
+    pub fn new(master: MasterClient) -> Self {
+        Self { master }
+    }
 
-	pub async fn remove(
-		&self,
-		user_id: String,
-		path: String,
-		recursive: bool,
-	) -> Result<(), Status> {
-		self.master.remove(user_id, path, recursive).await?;
-		Ok(())
-	}
+    pub async fn remove(
+        &self,
+        user_id: String,
+        path: String,
+        recursive: bool,
+    ) -> Result<(), Status> {
+        self.master.remove(user_id, path, recursive).await?;
+        Ok(())
+    }
 }
