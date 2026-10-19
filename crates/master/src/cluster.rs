@@ -230,14 +230,35 @@ impl ClusterState {
         self.inner.lock().unwrap().locations.len() as u64
     }
 
-    /// Blocks with fewer than `target` known copies.
-    pub fn under_replicated(&self, target: usize) -> u64 {
+    /// Blocks with fewer than `target` copies on workers that are not dead.
+    /// A copy on a dead worker does not count: that is exactly the copy the
+    /// health module has to replace.
+    pub fn under_replicated(&self, target: usize, now_ms: u64) -> u64 {
+        self.under_replicated_blocks(target, now_ms).len() as u64
+    }
+
+    /// Each block with fewer than `target` live copies, with the workers
+    /// (alive or suspect) that still hold it. An empty list means every known
+    /// copy is on a dead worker: nothing to copy from until one comes back.
+    pub fn under_replicated_blocks(
+        &self,
+        target: usize,
+        now_ms: u64,
+    ) -> Vec<(String, Vec<WorkerInfo>)> {
         let inner = self.inner.lock().unwrap();
         inner
             .locations
-            .values()
-            .filter(|holders| holders.len() < target)
-            .count() as u64
+            .iter()
+            .filter_map(|(block, holders)| {
+                let live: Vec<WorkerInfo> = holders
+                    .iter()
+                    .filter_map(|id| inner.workers.get(id))
+                    .filter(|w| w.state(now_ms) != WorkerState::Dead)
+                    .cloned()
+                    .collect();
+                (live.len() < target).then(|| (block.clone(), live))
+            })
+            .collect()
     }
 }
 

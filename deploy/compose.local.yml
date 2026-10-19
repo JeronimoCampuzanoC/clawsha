@@ -120,6 +120,29 @@ services:
       master-lb:
         condition: service_started
 
+  # Third worker: with R = 2 and only two workers, a dead one leaves nowhere
+  # to re-replicate. Stop any worker and its blocks get copied to the others.
+  worker-c:
+    image: samuelmarti22/clawsha-worker:latest
+    environment:
+      WORKER_ID: worker-c
+      WORKER_AZ: a
+      WORKER_PORT: "50052"
+      WORKER_ADVERTISE_ADDR: worker-c:50052
+      MASTER_ADDR: http://master-lb:50051
+      WORKER_DATA_DIR: /data
+      WORKER_QUOTA_BYTES: "2147483648"
+      # Short on purpose so the scrubber is easy to watch; the default is 600.
+      WORKER_SCRUB_INTERVAL_SECS: "30"
+      RUST_LOG: info
+    ports:
+      - "50055:50052"
+    volumes:
+      - worker-c-data:/data
+    depends_on:
+      master-lb:
+        condition: service_started
+
   gateway:
     image: samuelmarti22/clawsha-gateway:latest
     environment:
@@ -149,3 +172,4 @@ services:
 volumes:
   worker-a-data:
   worker-b-data:
+  worker-c-data:

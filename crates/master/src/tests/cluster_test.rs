@@ -179,5 +179,33 @@ fn under_replicated_counts_blocks_with_a_single_copy() {
     cluster.heartbeat(hb_with_blocks("w2", "b", &["b1"]), 0);
 
     assert_eq!(cluster.total_blocks(), 2);
-    assert_eq!(cluster.under_replicated(2), 1);
+    assert_eq!(cluster.under_replicated(2, S), 1);
+}
+
+#[test]
+fn copies_on_dead_workers_do_not_count_as_replicas() {
+    let cluster = ClusterState::new();
+    cluster.heartbeat(hb_with_blocks("w1", "a", &["b1"]), 0);
+    cluster.heartbeat(hb_with_blocks("w2", "b", &["b1"]), 0);
+    // Only w1 keeps talking.
+    cluster.heartbeat(hb("w1", "a"), 25 * S);
+
+    // Suspect still counts (it may be slow), dead does not.
+    assert_eq!(cluster.under_replicated(2, 20 * S), 0);
+    assert_eq!(cluster.under_replicated(2, 31 * S), 1);
+
+    let needy = cluster.under_replicated_blocks(2, 31 * S);
+    assert_eq!(needy.len(), 1);
+    assert_eq!(needy[0].0, "b1");
+    let holders: Vec<&str> = needy[0].1.iter().map(|w| w.id.as_str()).collect();
+    assert_eq!(holders, vec!["w1"]);
+}
+
+#[test]
+fn a_block_whose_only_copies_are_dead_has_no_live_holders() {
+    let cluster = ClusterState::new();
+    cluster.heartbeat(hb_with_blocks("w1", "a", &["b1"]), 0);
+
+    let needy = cluster.under_replicated_blocks(2, 31 * S);
+    assert_eq!(needy, vec![("b1".to_string(), vec![])]);
 }

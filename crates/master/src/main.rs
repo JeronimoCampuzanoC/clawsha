@@ -5,6 +5,7 @@ mod config;
 mod db;
 mod error;
 mod grpc;
+mod health;
 mod http;
 mod leader;
 mod namespace;
@@ -60,6 +61,15 @@ async fn main() -> anyhow::Result<()> {
 
     // The lease loop decides whether this process answers or waits.
     tokio::spawn(app.leadership.clone().run());
+
+    // Re-replication: only acts while this process leads.
+    let healer = Arc::new(health::Healer::new(
+        app.cluster.clone(),
+        health::GrpcWorkers,
+        app.replication,
+        app.block_size,
+    ));
+    tokio::spawn(health::run(healer, app.leadership.clone()));
 
     let grpc = TcpListener::bind(("0.0.0.0", config.port))
         .await
