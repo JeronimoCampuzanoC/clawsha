@@ -3,7 +3,7 @@
 //! readers get, and OLD after a newer one replaced it (or the file was
 //! removed). OLD and abandoned PENDING versions are what the GC collects.
 
-use aws_sdk_dynamodb::types::{Put, TransactWriteItem, Update};
+use aws_sdk_dynamodb::types::{ConditionCheck, Delete, Put, TransactWriteItem, Update};
 
 use super::attr::{Item, b, get_b, get_n, get_n_or, get_s, n, s};
 use super::tables::VERSIONS_BY_STATUS_INDEX;
@@ -124,9 +124,8 @@ impl Db {
 
     /// Versions in `status`, oldest update first, updated before `before_ms`.
     /// Reads the by_status index (eventually consistent, fine for a GC).
-    /// For the GC (B): OLD versions past the grace period and PENDING
-    /// uploads nobody finished.
-    #[allow(dead_code)]
+    /// For the GC: OLD versions past the grace period and PENDING uploads
+    /// nobody finished.
     pub async fn versions_by_status(
         &self,
         status: VersionStatus,
@@ -147,6 +146,76 @@ impl Db {
             .await
             .map_err(sdk_error)?;
         out.items().iter().map(version_from_item).collect()
+    }
+
+    /// GC: PENDING -> OLD for an upload whose writer is gone. Only if the
+    /// version is still PENDING and nobody holds a valid lease on the path,
+    /// both checked in the same transaction. Ok(false) when either check
+    /// fails: the upload may still be running, try again later.
+    pub async fn retire_abandoned_version(
+        &self,
+        fence: &Fence,
+        inode_id: &str,
+        version_no: u64,
+        now_ms: u64,
+    ) -> Result<bool, MasterError> {
+        let no_lease = ConditionCheck::builder()
+            .table_name(self.tables.path_leases())
+            .key("inode_id", s(inode_id))
+            .condition_expression("attribute_not_exists(inode_id) OR expires_at < :now")
+            .expression_attribute_values(":now", n(now_ms))
+            .build()
+            .map_err(build_error)?;
+        let retire = Update::builder()
+            .table_name(self.tables.versions())
+            .key("inode_id", s(inode_id))
+            .key("version_no", n(version_no))
+            .condition_expression("#status = :pending")
+            .update_expression("SET #status = :old, updated_at = :now")
+            .expression_attribute_names("#status", "status")
+            .expression_attribute_values(":pending", s(VersionStatus::Pending.as_str()))
+            .expression_attribute_values(":old", s(VersionStatus::Old.as_str()))
+            .expression_attribute_values(":now", n(now_ms))
+            .build()
+            .map_err(build_error)?;
+        let items = vec![
+            TransactWriteItem::builder()
+                .condition_check(no_lease)
+                .build(),
+            TransactWriteItem::builder().update(retire).build(),
+        ];
+        match self.fenced_write(fence, items).await {
+            Ok(()) => Ok(true),
+            Err(MasterError::ConditionFailed(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// GC: removes the row of an OLD version. Its block rows must be gone
+    /// already. Fine if the row is gone too (a retry).
+    pub async fn delete_old_version(
+        &self,
+        fence: &Fence,
+        inode_id: &str,
+        version_no: u64,
+    ) -> Result<(), MasterError> {
+        let delete = Delete::builder()
+            .table_name(self.tables.versions())
+            .key("inode_id", s(inode_id))
+            .key("version_no", n(version_no))
+            .condition_expression("attribute_not_exists(inode_id) OR #status = :old")
+            .expression_attribute_names("#status", "status")
+            .expression_attribute_values(":old", s(VersionStatus::Old.as_str()))
+            .build()
+            .map_err(build_error)?;
+        self.fenced_write(
+            fence,
+            vec![TransactWriteItem::builder().delete(delete).build()],
+        )
+        .await
+        .map_err(|e| {
+            on_condition_failed(e, MasterError::InvalidArgument("version is not OLD".into()))
+        })
     }
 }
 
