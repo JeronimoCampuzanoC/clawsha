@@ -1,4 +1,5 @@
 mod auth;
+mod cluster;
 mod delete;
 mod download;
 mod encript;

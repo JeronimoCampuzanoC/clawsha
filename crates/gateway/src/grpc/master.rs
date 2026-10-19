@@ -2,10 +2,11 @@ use tonic::Status;
 use tonic::transport::{Channel, Endpoint};
 
 use crate::pb::{
-    AbortUploadRequest, BlockAssignment, CommitUploadRequest, CorruptionReport, Empty, FileInfo,
-    Lease, LeaseRequest, ListResponse, LoginRequest, LoginResponse, MoveRequest, PathRequest,
-    ReadPlan, ReadPlanRequest, ReassignBlockRequest, RegisterRequest, RegisterResponse,
-    RemoveRequest, StartUploadRequest, UploadPlan, master_service_client::MasterServiceClient,
+    AbortUploadRequest, BlockAssignment, ClusterStatusResponse, CommitUploadRequest,
+    CorruptionReport, Empty, FileInfo, Lease, LeaseRequest, ListResponse, LoginRequest,
+    LoginResponse, MoveRequest, PathRequest, ReadPlan, ReadPlanRequest, ReassignBlockRequest,
+    RegisterRequest, RegisterResponse, RemoveRequest, StartUploadRequest, UploadPlan,
+    master_service_client::MasterServiceClient,
 };
 
 #[derive(Clone)]
@@ -144,6 +145,13 @@ impl MasterClient {
     pub async fn acquire_lease(&self, request: LeaseRequest) -> Result<Lease, Status> {
         let mut client = self.client.clone();
         let response = client.acquire_lease(request).await?;
+
+        Ok(response.into_inner())
+    }
+
+    pub async fn cluster_status(&self) -> Result<ClusterStatusResponse, Status> {
+        let mut client = self.client.clone();
+        let response = client.cluster_status(Empty {}).await?;
 
         Ok(response.into_inner())
     }

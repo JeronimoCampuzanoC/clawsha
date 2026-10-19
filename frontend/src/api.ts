@@ -295,3 +295,32 @@ export async function downloadFile(path: string, filename: string): Promise<void
 }
 
 export type { PreviewKind };
+
+export type WorkerState = "alive" | "suspect" | "dead" | "unknown";
+
+export interface WorkerSummary {
+  id: string;
+  addr: string;
+  az: string;
+  state: WorkerState;
+  quota_bytes: number;
+  used_bytes: number;
+  block_count: number;
+  /// Unix time in milliseconds.
+  last_heartbeat: number;
+}
+
+export interface ClusterStatus {
+  master_id: string;
+  is_leader: boolean;
+  fencing: number;
+  safe_mode: boolean;
+  under_replicated_blocks: number;
+  total_blocks: number;
+  workers: WorkerSummary[];
+}
+
+/// What the leader knows about the cluster, for the dashboard.
+export function clusterStatus(): Promise<ClusterStatus> {
+  return request<ClusterStatus>("/api/v1/cluster/status", { method: "GET" });
+}

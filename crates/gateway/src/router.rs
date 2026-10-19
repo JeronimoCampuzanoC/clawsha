@@ -7,6 +7,7 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(crate::auth::router(state.clone()))
+        .merge(crate::cluster::router(state.clone()))
         .merge(crate::read::router(state.clone()))
         .merge(crate::upload::router(state.clone()))
         .merge(crate::download::router(state.clone()))
@@ -83,6 +84,10 @@ mod tests {
         );
         assert_eq!(
             status("POST", "/api/v1/move").await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status("GET", "/api/v1/cluster/status").await,
             StatusCode::UNAUTHORIZED
         );
     }

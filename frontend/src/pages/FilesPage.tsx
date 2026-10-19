@@ -281,9 +281,14 @@ export default function FilesPage() {
     <>
       <header className="app-header">
         <h1>DFSha — Archivos</h1>
-        <button className="link" style={{ color: "#fff" }} onClick={handleLogout}>
-          Cerrar sesión
-        </button>
+        <nav className="header-nav">
+          <button className="link" style={{ color: "#fff" }} onClick={() => navigate("/cluster")}>
+            Clúster
+          </button>
+          <button className="link" style={{ color: "#fff" }} onClick={handleLogout}>
+            Cerrar sesión
+          </button>
+        </nav>
       </header>
 
       <div className="drive">
