@@ -1,24 +1,18 @@
 # Cómo levantar DFSha
 
-Guía práctica: qué correr en el Mac para probar lo que hay hoy, cómo se verá
-el clúster completo en local cuando B y C entreguen sus partes, y cómo queda
-desplegado en AWS según el diseño. Los comandos de la sección local están
-probados; los de la nube describen lo que falta construir en `infra/`.
+Guía práctica: el clúster completo en local con Docker, el master solo para
+desarrollarlo, y el despliegue en AWS con Terraform.
 
-## 0. Qué existe hoy
+## 0. Qué existe
 
 | Componente | Estado | Dueño |
 | --- | --- | --- |
-| `proto/dfs.proto` | Los 3 servicios definidos (`WorkerService`, `MasterService`, `ClusterService`) | A y B |
-| `crates/master` | Completo para P0: metadata, namespace, subida/commit, planes de lectura, lease de líder, `/health/leader`. Ver `docs/master.md` | A |
-| `crates/worker` | Solo el almacenamiento en disco (escritura segura, hash, cuota). El binario abre `/data` y termina: todavía no sirve gRPC ni manda heartbeats | B |
-| `crates/gateway`, `frontend/` | Vacíos | C |
-| `infra/` (Terraform), `infra/scripts` (user-data) | Escrito, sin aplicar en AWS | B |
-| `deploy/compose.local.yml` | DynamoDB Local + 2 masters; faltan workers y gateway | A (base) |
-
-Conclusión: hoy se puede levantar la base de datos y los dos masters, hablarles
-por gRPC y ver el failover. No hay todavía por dónde subir un archivo de
-verdad, porque eso pasa por el gateway y los workers.
+| `proto/dfs.proto` | Los 3 servicios (`WorkerService`, `MasterService`, `ClusterService`) | A y B |
+| `crates/master` | Metadata, namespace, subida/commit, planes de lectura, lease de líder, `/health/leader`, re-replicación, GC y métrica del ASG. Ver `docs/master.md` | A (+ health/GC) |
+| `crates/worker` | gRPC completo (`PutBlock`/`GetBlock` con pipeline, `ReplicateBlock`, `DeleteBlock`), heartbeats, block reports y scrubber | B |
+| `crates/gateway`, `frontend/` | API REST con JWT y cifrado de bloques; web con archivos y dashboard | C |
+| `infra/` | Terraform de toda la plataforma (sección 4) | B |
+| `deploy/compose.local.yml` | Clúster completo en local (sección 3) | todos |
 
 ## 1. Requisitos en el Mac
 
@@ -41,7 +35,7 @@ Comprobación rápida:
 cargo --version && protoc --version && java -version && grpcurl --version
 ```
 
-## 2. Local, hoy: base de datos + master
+## 2. Solo la base de datos y el master (desarrollo del master)
 
 Todo desde la raíz del repo (`code/dfsha`).
 
@@ -151,47 +145,65 @@ cargo run -p master -- --id master-b --az b --port 50062 --health-port 8082 \
 
 ## 3. Local, clúster completo
 
-La idea del plan es un solo `compose`:
+Desde la raíz del repo. Construye las imágenes desde este checkout (la
+primera vez tarda varios minutos por la compilación de Rust):
 
 ```bash
-docker compose -f deploy/compose.local.yml pull
-docker compose -f deploy/compose.local.yml up -d
+docker compose -f deploy/compose.local.yml -f deploy/compose.build.yml up -d --build
 ```
 
-El archivo levanta `dynamodb`, dos masters, tres workers y un gateway. El
-tercer worker existe para la re-replicación: con R = 2 y solo dos workers, si
-uno cae no hay a dónde copiar sus bloques.
+Sin `compose.build.yml` usa las imágenes publicadas en Docker Hub
+(`docker compose -f deploy/compose.local.yml pull`), que pueden no tener build
+para `arm64`.
 
-| Servicio | Quién | Qué necesita |
+| Servicio | Qué es | Puerto en el Mac |
 | --- | --- | --- |
-| `worker-a`, `worker-b`, `worker-c` | B | `WORKER_ID`, `WORKER_AZ`, `WORKER_DATA_DIR` con un volumen, `WORKER_QUOTA_BYTES` y la dirección del master |
-| `gateway` | C | Puerto 3001 en local, secreto del JWT y dirección del master |
+| `dynamodb` | DynamoDB Local **en memoria**: si el contenedor se reinicia, se pierden usuarios y archivos | 8000 |
+| `master-a`, `master-b` | Los dos masters; uno lidera | gRPC 50051/50052, health 8081/8082 |
+| `master-lb` | HAProxy: el equivalente local del NLB interno, enruta al que responde 200 en `/health/leader` | 50050 |
+| `worker-a`, `worker-c` (AZ `a`), `worker-b` (AZ `b`) | Workers; con R = 2 el tercero es el que permite re-replicar | 50053–50055 |
+| `gateway` | API REST | 3001 |
+| `frontend` | Web; `/api/` va al gateway | 8088 |
 
-Flujo esperado cuando todo esté: el navegador entra al gateway, el gateway
-pide `StartUpload` al master líder, manda los bloques a los workers con
-`PutBlock`, confirma con `CommitUpload`; los workers mandan heartbeats cada
-3 s y el dashboard lee `ClusterStatus`.
+Abrir `http://localhost:8088`, registrarse y subir un archivo. El dashboard
+está en `http://localhost:8088/cluster`: líder, workers por AZ, bloques y
+sub-replicados, refrescado cada 3 s.
 
-Construir solo la imagen del master (para verificar el Dockerfile):
+**Pruebas de falla a mano**
 
 ```bash
-docker build -f deploy/docker/master.Dockerfile -t dfsha-master .
+# failover del master: el otro lidera en ~10 s (ver el dashboard)
+docker stop deploy-master-b-1        # o el que sea líder
+
+# worker caído: a los 30 s pasa a DEAD y los sub-replicados vuelven a 0
+docker stop deploy-worker-b-1
+docker start deploy-worker-b-1       # vuelve; el GC quita las copias sobrantes
+
+# estado crudo, sin el gateway
+grpcurl -plaintext -import-path proto -proto dfs.proto \
+  localhost:50050 dfs.v1.MasterService/ClusterStatus
 ```
 
-## 4. En AWS (Learner Lab), como está diseñado
+**Si DynamoDB Local se reinició** (por ejemplo, al reiniciar Docker Desktop),
+los workers quedan con bloques que ningún archivo referencia. El GC no los
+borra: si la mayoría de los bloques son huérfanos que él no produjo, asume que
+la metadata está mal y deja un error en el log del líder. Para empezar de cero:
 
-Nada de esto existe todavía en `infra/`; es el guion que debe cumplir el
-Terraform de B y lo que cada nodo necesita para arrancar.
+```bash
+docker compose -f deploy/compose.local.yml down
+docker volume rm deploy_worker-a-data deploy_worker-b-data deploy_worker-c-data
+```
+
+## 4. En AWS (Learner Lab)
 
 **Antes de aplicar**
 
-1. Las imágenes Docker de master, worker y gateway publicadas en GHCR por
-   GitHub Actions (el workflow actual solo compila y prueba; falta el paso de
-   `docker build` + `push`).
+1. Las imágenes en Docker Hub: el CI las publica en cada push a `main` como
+   `<usuario>/clawsha-{master,worker,gateway,frontend}:latest`.
 2. Iniciar el Learner Lab y copiar las credenciales de "AWS Details" a
-   `~/.aws/credentials` (access key, secret y session token). Cambian en cada
-   sesión; solo la persona dueña de la cuenta corre Terraform.
-3. Un bucket S3 para el estado de Terraform (`backend.tf`).
+   `~/.aws/credentials` (cambian en cada sesión).
+3. `cp infra/terraform.tfvars.example infra/terraform.tfvars` y poner las
+   imágenes. Opcional: el bucket S3 del estado en `backend.tf`.
 
 **Aplicar**
 
@@ -199,71 +211,35 @@ Terraform de B y lo que cada nodo necesita para arrancar.
 cd infra
 terraform init
 terraform apply          # unos minutos
-terraform output         # DNS del NLB público y del interno
+terraform output         # api_url, masters_internal_dns, worker_asg, ...
 ```
 
 Lo que crea, en `us-east-1`:
 
 | Pieza | Detalle |
 | --- | --- |
-| Red | VPC `10.0.0.0/16`, 2 AZ, subredes públicas y privadas, 1 NAT, endpoint de VPC para DynamoDB |
-| Seguridad | Un security group por rol; ningún puerto 22; acceso por SSM Session Manager; IMDSv2 obligatorio |
-| Datos | Las 7 tablas de DynamoDB (abajo), secretos en Secrets Manager (CA, certificados por rol, secreto del JWT) |
-| Control | 2 ASG de exactamente 1 instancia `t3.small` (una por AZ): corren master + gateway |
-| Workers | 1 ASG de 4 a 7 `t3.micro` en las 2 AZ, volumen de datos de 10 GiB gp3 cifrado; alarma de CloudWatch `DFSha/ClusterUsedPercent > 70 %` durante 2 min → +1 |
-| Borde | NLB público `:443` → gateways; NLB interno `:50051` → el master que responda 200 en `:8080/health/leader` |
+| Red | VPC en 2 AZ, subredes públicas y privadas por rol, NAT, endpoint de VPC para DynamoDB |
+| Seguridad | Un security group por rol, sin puerto 22 (acceso por SSM), IMDSv2 obligatorio |
+| Datos | Las 7 tablas de DynamoDB con PITR (como en `crates/master/src/db/tables.rs`) |
+| Masters | 2 ASG de exactamente 1 instancia `t3.small`, una por AZ, detrás de un NLB interno `:50051` que revisa `/health/leader` |
+| Gateways | 1 nodo `t3.small` por AZ con el gateway y el frontend (nginx), detrás de un NLB público `:443` con certificado autofirmado (`api_ca_pem`) |
+| Workers | ASG de 3 a 6 `t3.micro` en las 2 AZ, volumen gp3 cifrado de 10 GiB en `/data`; +1 worker si `DFSha/ClusterUsedPercent` pasa del 70 % por 2 min o la CPU por 3 min. Sin scale-in |
 
-**Tablas que Terraform debe crear** (exactamente como en
-`crates/master/src/db/tables.rs`, facturación por demanda):
-
-| Tabla | Clave de partición | Clave de orden | Índice |
-| --- | --- | --- | --- |
-| `dfsha_users` | `user_id` (S) | — | |
-| `dfsha_usernames` | `username` (S) | — | |
-| `dfsha_inodes` | `parent_id` (S) | `name` (S) | |
-| `dfsha_versions` | `inode_id` (S) | `version_no` (N) | GSI `by_status`: `status` (S) / `updated_at` (N), proyección ALL |
-| `dfsha_blocks` | `version_id` (S) | `idx` (N) | |
-| `dfsha_cluster` | `pk` (S) | — | |
-| `dfsha_path_leases` | `inode_id` (S) | — | |
-
-Point-in-time recovery activado. El prefijo `dfsha_` es `MASTER_TABLE_PREFIX`.
-
-**Cómo arranca cada nodo** (`infra/scripts/*.sh.tftpl`)
-
-Nodo de control (`control.sh`): instala Docker, lee los secretos con el
-`LabInstanceProfile`, averigua su AZ e IP privada por IMDSv2 y corre dos
-contenedores:
-
-```bash
-docker run -d --name master --restart always -p 50051:50051 -p 8080:8080 \
-  -e MASTER_ID=control-$AZ -e MASTER_AZ=$AZ \
-  -e MASTER_ADVERTISE_ADDR=$PRIVATE_IP:50051 \
-  -e MASTER_TABLE_PREFIX=dfsha_ -e MASTER_CREATE_TABLES=false \
-  -e MASTER_REPLICATION=2 -e RUST_LOG=info \
-  ghcr.io/<org>/dfsha-master:latest
-# + el contenedor del gateway (C): puerto 443, secreto del JWT, DNS del NLB interno
-```
-
-Sin `MASTER_DYNAMODB_ENDPOINT` el SDK usa DynamoDB real con las credenciales
-del instance profile. La región está fija en `us-east-1` en el código.
-
-Worker (`worker.sh`): formatea y monta el volumen de datos en `/data`, lee su
-AZ por IMDSv2 y corre el contenedor del worker con `WORKER_ID` (el instance
-id), `WORKER_AZ`, `WORKER_DATA_DIR=/data`, `WORKER_QUOTA_BYTES` y la dirección
-del master = DNS del NLB interno `:50051`.
+El secreto del JWT y la llave de cifrado de bloques los genera Terraform
+(`random_password`, `random_id`) y llegan a los gateways por user-data. Los
+masters publican la métrica de uso porque `master.sh.tftpl` pone
+`MASTER_CLOUDWATCH_NAMESPACE=DFSha`.
 
 **Verificar que quedó bien**
 
-1. Consola de EC2 → Target groups: el NLB interno tiene 1 target sano (el
-   líder) y 1 no sano (el standby); el público, 2 gateways sanos.
-2. `aws dynamodb list-tables` muestra las 7 tablas; `aws dynamodb get-item
-   --table-name dfsha_cluster --key '{"pk":{"S":"leader"}}'` muestra quién
-   lidera y el `fencing`.
-3. Entrar a un nodo por SSM (`aws ssm start-session --target <instance-id>`)
-   y `curl localhost:8080/health/leader`.
-4. Abrir `https://<DNS del NLB público>` (o el subdominio de DuckDNS), entrar,
-   subir un archivo de más de 16 MiB y ver sus bloques por AZ en el detalle.
-5. Correr las pruebas de caos de `scripts/chaos/` (B) para el video.
+1. EC2 → Target groups: el NLB interno tiene 1 target sano (el líder) y 1 no
+   sano (el standby); el público, 2 gateways sanos.
+2. Abrir `api_url`, aceptar el certificado, registrarse, subir un archivo de
+   más de 16 MiB y mirar `/cluster`.
+3. CloudWatch → Metrics → `DFSha` → `ClusterUsedPercent` recibe un punto por
+   minuto.
+4. Terminar una instancia de worker desde la consola: en el dashboard pasa a
+   DEAD a los 30 s, los sub-replicados vuelven a 0 y el ASG lanza otra.
 
 **Al terminar cada jornada**
 
@@ -274,18 +250,9 @@ terraform destroy
 El NAT y los NLB cobran por hora aunque el lab esté apagado; si se acaba el
 presupuesto, la cuenta se desactiva y se pierde todo.
 
-## 5. Qué falta para que "levantar todo" sea real
+## 5. Qué falta
 
-- **B:** servidor gRPC del worker (`PutBlock`/`GetBlock` en streaming,
-  `ReplicateBlock`, `DeleteBlock`), heartbeat cada 3 s a `ClusterService` con
-  los bloques nuevos y borrados, `BlockReport` completo al arrancar, cada 5 min
-  y cuando cambia el `fencing`; módulo `health` del master (re-replicación,
-  reparación, GC con `versions_by_status`/`delete_blocks`, métrica para el
-  ASG); Terraform, user-data y scripts de caos.
-- **C:** gateway REST (JWT, troceo en frames de 256 KiB, `PutBlock` al primer
-  worker con `next_worker`, `CommitUpload` con los acks de las 2 réplicas,
-  `GetReadPlan` + `GetBlock` con verificación de hash y fallback), web React,
-  CA propia y mTLS, secretos.
-- **A:** modo seguro real tras un failover, caché ruta → inodo, marcar bloques
-  para moverse cuando las dos réplicas quedaron en la misma AZ, y las secciones
-  del informe (`docs/master.md` es el borrador).
+- mTLS entre servicios: hoy el gRPC interno va en texto plano dentro de la VPC.
+- Scripts de caos en `scripts/chaos/` (las pruebas de falla de la sección 3
+  son a mano) y benchmarks.
+- Modo seguro "hasta que reporten todos los workers"; hoy son 30 s fijos.

@@ -46,4 +46,9 @@ pub struct Config {
     /// dynamodb-local; on AWS Terraform owns the tables, so leave it off.
     #[arg(long, env = "MASTER_CREATE_TABLES", default_value_t = false)]
     pub create_tables: bool,
+
+    /// CloudWatch namespace for the ClusterUsedPercent metric the workers'
+    /// ASG scales on ("DFSha" on AWS). Empty: the metric is not published.
+    #[arg(long, env = "MASTER_CLOUDWATCH_NAMESPACE", default_value = "")]
+    pub cloudwatch_namespace: String,
 }

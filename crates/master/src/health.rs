@@ -19,7 +19,6 @@
 //! block then has R + 1 copies, which costs space but loses nothing).
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,15 +26,14 @@ use rand::Rng;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
-use tonic::transport::Endpoint;
 use tonic::{Code, Status};
 use tracing::{info, warn};
 
 use crate::cluster::{ClusterState, WorkerInfo, WorkerState};
 use crate::leader::Leadership;
 use crate::pb;
-use crate::pb::worker_service_client::WorkerServiceClient;
 use crate::placement;
+use crate::workers::WorkerClient;
 
 /// How often the leader looks for blocks to repair.
 pub const PASS_EVERY_MS: u64 = 5_000;
@@ -46,7 +44,6 @@ pub const REPAIR_GRACE_MS: u64 = 10_000;
 /// Copies a worker may send or receive at once, so repairs do not starve the
 /// uploads and downloads that share its disk and network.
 pub const MAX_STREAMS_PER_WORKER: usize = 2;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// A 16 MiB block takes about a second inside the VPC; this only cuts off a
 /// worker that hangs mid-copy, so the block is retried on the next pass.
 const REPLICATE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -123,42 +120,6 @@ pub fn plan_repairs<R: Rng>(
         });
     }
     repairs
-}
-
-/// The one call this module makes to workers. A trait so the tests can fake
-/// the workers instead of starting real ones.
-pub trait WorkerClient: Send + Sync + 'static {
-    /// Sends `request` to the worker at `worker_addr` (the source of the
-    /// copy). Returns the bytes it sent.
-    fn replicate(
-        &self,
-        worker_addr: &str,
-        request: pb::ReplicateBlockRequest,
-    ) -> impl Future<Output = Result<u64, Status>> + Send;
-}
-
-/// The real client: plain gRPC to the worker's advertised address.
-pub struct GrpcWorkers;
-
-impl WorkerClient for GrpcWorkers {
-    async fn replicate(
-        &self,
-        worker_addr: &str,
-        request: pb::ReplicateBlockRequest,
-    ) -> Result<u64, Status> {
-        let channel = Endpoint::from_shared(format!("http://{worker_addr}"))
-            .map_err(|e| {
-                Status::invalid_argument(format!("bad worker address {worker_addr}: {e}"))
-            })?
-            .connect_timeout(CONNECT_TIMEOUT)
-            .connect()
-            .await
-            .map_err(|e| Status::unavailable(format!("cannot reach {worker_addr}: {e}")))?;
-        let response = WorkerServiceClient::new(channel)
-            .replicate_block(request)
-            .await?;
-        Ok(response.into_inner().sent_bytes)
-    }
 }
 
 #[derive(Default)]

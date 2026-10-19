@@ -1,0 +1,10 @@
+# D5: kill the leader 3.5 s into a 1 GiB upload
+leader: a=leader fencing=2 b=standby
+killed master-a at t=+3.5s
+upload result: 502 10.725820 body=
+(ended t=+10.8s)
+metadata back at t=+17.2s; master-b: leader fencing=3
+partial file visible: []
+committed f100m: 200 0.522512 sha=OK
+committed f1g: 200 4.636326 sha=OK
+retry upload: 503 (cluster full: worker-b and worker-c at 2126512132/2147483648 bytes; the aborted upload's blocks stay PENDING ~1 h)

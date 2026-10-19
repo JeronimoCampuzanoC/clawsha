@@ -1,0 +1,14 @@
+after load (15 x 100 MiB): worker-a=53 worker-b=105 worker-c=52
+  worker-a az=a used=8.3%
+  worker-b az=b used=15.4%
+  worker-c az=a used=7.1%
+worker-d joined (az b, empty): worker-a=53 worker-b=105 worker-c=52 worker-d=0
+after 20 x 100 MiB more (140 blocks, 280 copies): worker-a=121 worker-b=162 worker-c=124 worker-d=83
+  new copies on worker-a: 68
+  new copies on worker-b: 57
+  new copies on worker-c: 72
+  new copies on worker-d: 83
+  worker-a az=a used=19.4%
+  worker-b az=b used=26.4%
+  worker-c az=a used=19.1%
+  worker-d az=b used=12.1%

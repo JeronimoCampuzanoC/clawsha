@@ -18,10 +18,10 @@ use uuid::Uuid;
 use crate::error::StorageError;
 
 pub(crate) use block_writer::BlockWriter;
-pub(crate) use changes::SharedChanges;
-pub(crate) use checksum::meta_path_for;
 #[allow(unused_imports)]
 pub use changes::Changes;
+pub(crate) use changes::SharedChanges;
+pub(crate) use checksum::meta_path_for;
 // Part of the public API; only used by tests until the BlockReport is built.
 #[allow(unused_imports)]
 pub use listing::BlockInfo;

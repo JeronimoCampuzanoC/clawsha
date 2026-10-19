@@ -1,0 +1,4 @@
+# D6: kill the leader 1.5 s into a 1 GiB download
+killed leader master-a at t=+1.5s
+download: 200 4.307489
+sha=OK

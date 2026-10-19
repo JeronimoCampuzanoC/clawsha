@@ -112,7 +112,10 @@ impl Cluster {
         let storage = Arc::clone(&self.storage);
         let blocks = blocking(move || list_entries(&storage)).await?;
 
-        info!(blocks = blocks.len(), leader_fencing, "sending block report");
+        info!(
+            blocks = blocks.len(),
+            leader_fencing, "sending block report"
+        );
         self.client
             .block_report(BlockReportRequest {
                 worker_id: self.config.id.clone(),

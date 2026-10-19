@@ -1,0 +1,28 @@
+## T2 namespace
+mkdir /docs: 201
+mkdir /docs/sub: 201
+mkdir /no/parent: 404
+mkdir /docs again: 409
+upload /docs/a.bin: 201 0.047289
+ls /docs: [{"name":"a.bin","kind":"file","size":1},{"name":"sub","kind":"directory","size":0}]
+mv /docs/a.bin -> /docs/sub/b.bin: 204
+download moved: 200 0.011274 sha=OK
+download old path: 404 0.003687
+rmdir non-empty /docs (no recursive): 409
+upload same name twice -> numbered copy:
+  second upload stored as /dup (1).bin
+rm /docs/sub/b.bin: 204
+rm -r /docs: 204
+ls /: ["dup (1).bin","dup.bin","f0","f1","f100m","f16m","f16m1","f1g"]
+## T3 isolation
+register bob: 201
+register alice again: 400
+bob downloads alice's /f1: 404 0.002502
+bob ls / : []
+bob rm alice's /f1: 404
+alice still has /f1: 200 0.005339
+login wrong password: 401
+## T4 concurrent writes to /race.bin (2 x 100 MiB)
+  A: 201 1.080177 -> /race.bin
+  B: 409 0.008118 -> 
+ls /: ["race.bin"]

@@ -535,7 +535,9 @@ async fn pipeline_stores_the_block_on_both_workers() {
     let b_address = start_server(b_svc).await;
 
     let frames = pipeline_frames(&b_address, &[b"hello ", b"distributed ", b"world"]);
-    receive_block(Arc::clone(&a), incoming(frames)).await.unwrap();
+    receive_block(Arc::clone(&a), incoming(frames))
+        .await
+        .unwrap();
 
     for storage in [&a, &b] {
         let stored = std::fs::read(storage.block_path(ID).unwrap()).unwrap();
@@ -553,7 +555,9 @@ async fn pipeline_fails_with_unavailable_and_writes_nothing_if_the_next_worker_i
     drop(free);
 
     let frames = pipeline_frames(&dead_address, &[b"hello"]);
-    let status = receive_block(Arc::clone(&a), incoming(frames)).await.unwrap_err();
+    let status = receive_block(Arc::clone(&a), incoming(frames))
+        .await
+        .unwrap_err();
 
     assert_eq!(status.code(), Code::Unavailable);
     assert!(!a.block_path(ID).unwrap().exists());
@@ -569,10 +573,15 @@ async fn pipeline_leaves_no_copy_on_a_if_the_next_worker_rejects_the_block() {
     store_block(&b, ID, b"hello");
 
     let frames = pipeline_frames(&b_address, &[b"hello"]);
-    let status = receive_block(Arc::clone(&a), incoming(frames)).await.unwrap_err();
+    let status = receive_block(Arc::clone(&a), incoming(frames))
+        .await
+        .unwrap_err();
 
     assert_eq!(status.code(), Code::AlreadyExists);
     assert!(!a.block_path(ID).unwrap().exists());
     assert_eq!(a.used_bytes(), 0);
-    assert_eq!(std::fs::read_dir(a_dir.path().join("tmp")).unwrap().count(), 0);
+    assert_eq!(
+        std::fs::read_dir(a_dir.path().join("tmp")).unwrap().count(),
+        0
+    );
 }

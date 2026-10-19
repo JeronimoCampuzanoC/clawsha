@@ -15,7 +15,9 @@ impl Storage {
         fs::remove_file(&path).map_err(io_to_storage)?;
         self.used_bytes.fetch_sub(size, Ordering::SeqCst);
         let _ = fs::remove_file(meta_path_for(&path));
-        lock(&self.changes).removed_blocks.push(block_id.to_string());
+        lock(&self.changes)
+            .removed_blocks
+            .push(block_id.to_string());
 
         Ok(size)
     }

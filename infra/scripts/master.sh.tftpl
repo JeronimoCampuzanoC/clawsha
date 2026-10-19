@@ -33,6 +33,7 @@ docker run -d --name master --restart always \
   -e MASTER_TABLE_PREFIX="${table_prefix}" \
   -e MASTER_CREATE_TABLES=false \
   -e MASTER_REPLICATION=2 \
+  -e MASTER_CLOUDWATCH_NAMESPACE=DFSha \
   -e AWS_REGION="${region}" \
   -e RUST_LOG=info \
   "${image}"
