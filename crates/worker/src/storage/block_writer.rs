@@ -1,5 +1,5 @@
-use crate::error::StorageError;
 use super::changes::{SharedChanges, lock};
+use crate::error::StorageError;
 use crate::storage::meta_path_for;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};

@@ -1,4 +1,5 @@
 mod auth;
+mod cluster;
 mod delete;
 mod download;
 mod encript;
@@ -30,12 +31,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let master_address = std::env::var("MASTER_ADDRESS")
-        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+    let master_address =
+        std::env::var("MASTER_ADDRESS").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
     let master = MasterClient::connect(master_address)?;
 
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .map_err(|_| "JWT_SECRET must be configured")?;
+    let jwt_secret = std::env::var("JWT_SECRET").map_err(|_| "JWT_SECRET must be configured")?;
     let jwt = JwtService::new(jwt_secret)?;
     let auth_service = AuthService::new(master, jwt);
 
@@ -45,8 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState::new(auth_service, cipher);
 
-    let address = std::env::var("GATEWAY_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let address = std::env::var("GATEWAY_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
     let listener = TcpListener::bind(&address).await?;
     tracing::info!(address = ?listener.local_addr()?, "gateway listening");
 

@@ -7,6 +7,7 @@ import {
 import { AuthProvider, useAuth } from "./auth";
 import LoginPage from "./pages/LoginPage";
 import FilesPage from "./pages/FilesPage";
+import ClusterPage from "./pages/ClusterPage";
 import type { ReactNode } from "react";
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -37,6 +38,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <FilesPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/cluster"
+            element={
+              <RequireAuth>
+                <ClusterPage />
               </RequireAuth>
             }
           />
