@@ -280,7 +280,7 @@ export default function FilesPage() {
   return (
     <>
       <header className="app-header">
-        <h1>DFSha — Archivos</h1>
+        <h1>DClawha — Archivos</h1>
         <button className="link" style={{ color: "#fff" }} onClick={handleLogout}>
           Cerrar sesión
         </button>
